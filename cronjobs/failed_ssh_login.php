@@ -8,9 +8,17 @@ chdir(dirname(__FILE__));
 require_once "../include/db.php";
 
 function extractFailedIPs($logFile, $conn) {
+    // Purge records older than 24 hours
+    $purgeQuery = "DELETE FROM failed_ips WHERE timestamp < NOW() - INTERVAL 24 HOUR";
+    if ($conn->query($purgeQuery) === TRUE) {
+        echo "Old records successfully purged.\n";
+    } else {
+        echo "Error purging old records: " . $conn->error . "\n";
+    }
+
     // Check if the log file exists
     if (!file_exists($logFile)) {
-        echo "Log file missing. Please verify the path.";
+        echo "Log file missing. Please verify the path.\n";
         return; // Exit the function gracefully
     }
 
@@ -35,7 +43,7 @@ function extractFailedIPs($logFile, $conn) {
         }
     }
 
-    echo "IPs successfully extracted and stored.";
+    echo "IPs successfully extracted and stored.\n";
 }
 
 // Path to the auth log file
