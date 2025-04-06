@@ -23,8 +23,8 @@ function extractFailedIPs($logFile, $conn) {
     // Loop through log lines to find failed SSH attempts
     foreach ($logContent as $line) {
         if (strpos($line, 'Failed password for') !== false) {
-            // Extract both IPv4 and IPv6 using regex
-            preg_match('/((\d{1,3}\.){3}\d{1,3}|([a-f0-9:]+:+)+[a-f0-9]+)/i', $line, $matches);
+            // Extract both IPv4 and IPv6 using refined regex
+            preg_match('/\b(?:\d{1,3}\.){3}\d{1,3}\b|(?:(?:[a-fA-F0-9]{1,4}:){1,7}[a-fA-F0-9]{1,4})/', $line, $matches);
 
             if (!empty($matches)) {
                 $ip = $matches[0];
