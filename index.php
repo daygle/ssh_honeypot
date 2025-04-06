@@ -1,40 +1,22 @@
 <?php
-// Path to the auth log file
-$logFile = '/var/log/auth.log';
+// File: public/index.php
 
-// Open the file for reading
-if (file_exists($logFile)) {
-    $logContent = file($logFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+require_once "../include/db.php";
 
-    // Array to store failed attempt IPs
-    $failedIPs = [];
+// Fetch IP addresses from the database
+$query = "SELECT ip_address FROM failed_ips ORDER BY timestamp DESC";
+$result = $mysqli->query($query);
 
-    // Loop through each line of the log file
-    foreach ($logContent as $line) {
-        // Look for lines indicating failed SSH attempts
-        if (strpos($line, 'Failed password for') !== false) {
-            // Extract the IP address using regex
-            preg_match('/(\d{1,3}\.){3}\d{1,3}/', $line, $matches);
-
-            // Add the IP to the array if found
-            if (!empty($matches)) {
-                $failedIPs[] = $matches[0];
-            }
-        }
+// Check if there are rows to display
+if ($result->num_rows > 0) {
+    // Output each IP address on a new line
+    while ($row = $result->fetch_assoc()) {
+        echo htmlspecialchars($row['ip_address']) . "<br>";
     }
-
-    // Remove duplicate IPs
-    $failedIPs = array_unique($failedIPs);
-
-    // Display the IPs
-    echo "<h1>Failed SSH Attempt IPs:</h1>";
-    echo "<ul>";
-    foreach ($failedIPs as $ip) {
-        echo "<li>$ip</li>";
-    }
-    echo "</ul>";
-
 } else {
-    echo "Log file not found!";
+    echo "No failed login attempts found.";
 }
+
+// Close the database connection
+$mysqli->close();
 ?>
