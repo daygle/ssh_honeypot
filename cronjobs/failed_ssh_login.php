@@ -30,7 +30,7 @@ function extractFailedIPs($logFile, $conn) {
                 $ip = $matches[1]; // Use the captured IP
                 error_log("Extracted IP: $ip");
 
-                // Use INSERT IGNORE to avoid duplicates
+                // Use INSERT IGNORE to avoid duplicates (Database-level check)
                 $stmtInsert = $conn->prepare("INSERT IGNORE INTO failed_ips (ip_address) VALUES (?)");
                 $stmtInsert->bind_param("s", $ip);
                 $stmtInsert->execute();
