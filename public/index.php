@@ -5,7 +5,7 @@ require_once "../include/db.php";
 
 // Fetch IP addresses from the database
 $query = "SELECT ip_address FROM failed_ips ORDER BY timestamp DESC";
-$result = $mysqli->query($query);
+$result = $conn->query($query);
 
 // Check if there are rows to display
 if ($result->num_rows > 0) {
@@ -18,5 +18,5 @@ if ($result->num_rows > 0) {
 }
 
 // Close the database connection
-$mysqli->close();
+$conn->close();
 ?>
