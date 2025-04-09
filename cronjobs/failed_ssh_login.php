@@ -34,8 +34,11 @@ function extractFailedIPs($logFile, $conn) {
             if (!empty($matches)) {
                 $ip = $matches[1]; // Use the captured IP
 
-                // Use INSERT IGNORE to avoid duplicates (Database-level check)
-                $stmtInsert = $conn->prepare("INSERT IGNORE INTO failed_ips (ip_address) VALUES (?)");
+                // Use INSERT with ON DUPLICATE KEY to avoid updating existing timestamps
+                $stmtInsert = $conn->prepare(
+                    "INSERT INTO failed_ips (ip_address) VALUES (?) 
+                     ON DUPLICATE KEY UPDATE ip_address = ip_address"
+                );
                 $stmtInsert->bind_param("s", $ip);
                 $stmtInsert->execute();
                 $stmtInsert->close();
