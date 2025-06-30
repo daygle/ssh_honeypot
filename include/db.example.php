@@ -2,7 +2,7 @@
 // File: include/db.example.php
 
 // Replace with your actual database credentials
-$host = 'mysql.daygle';
+$host = 'mysql.dmz.daygle.net';
 $username = 'daygle-ssh';
 $password = 'Secret_Password!';
 $database = 'daygle-ssh';
