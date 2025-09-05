@@ -2,56 +2,50 @@
 <?php
 // File: cronjobs/failed_ssh_login.php
 
-// Change to the working directory
 chdir(dirname(__FILE__));
-
 require_once "../include/db.php";
-
-function extractFailedIPs($logFile, $conn) {
-    // Purge records older than 24 hours
-    $purgeQuery = "DELETE FROM failed_ips WHERE timestamp < NOW() - INTERVAL 24 HOUR";
-    if ($conn->query($purgeQuery) === TRUE) {
-        echo "Old records successfully purged.\n";
-    } else {
-        echo "Error purging old records: " . $conn->error . "\n";
-    }
-
-    // Check if the log file exists
-    if (!file_exists($logFile)) {
-        echo "Log file missing. Please verify the path.\n";
-        return; // Exit the function gracefully
-    }
-
-    // Read the log file line by line
-    $logContent = file($logFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-
-    // Loop through log lines to find failed SSH attempts
-    foreach ($logContent as $line) {
-        if (strpos($line, 'Failed password for') !== false) {
-            // Extract IP address after "from"
-            preg_match('/from ((?:\d{1,3}\.){3}\d{1,3}|(?:[a-fA-F0-9]{1,4}:){1,7}[a-fA-F0-9]{1,4})/', $line, $matches);
-
-            if (!empty($matches)) {
-                $ip = $matches[1]; // Use the captured IP
-
-                // Use INSERT with ON DUPLICATE KEY to avoid updating existing timestamps
-                $stmtInsert = $conn->prepare(
-                    "INSERT INTO failed_ips (ip_address) VALUES (?) 
-                     ON DUPLICATE KEY UPDATE ip_address = ip_address"
-                );
-                $stmtInsert->bind_param("s", $ip);
-                $stmtInsert->execute();
-                $stmtInsert->close();
-            }
-        }
-    }
-
-    echo "IPs successfully extracted and stored.\n";
-}
 
 // Path to the auth log file
 $logFile = '/var/log/auth.log';
-extractFailedIPs($logFile, $conn);
 
+// Check if the log file exists
+if (!file_exists($logFile)) {
+    echo "Log file missing. Please verify the path.\n";
+    exit(1);
+}
+
+// Step 1: Extract IPs from the log file
+$logContent = file($logFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+$ipSet = [];
+
+foreach ($logContent as $line) {
+    if (strpos($line, 'Failed password for') !== false) {
+        preg_match('/from ((?:\d{1,3}\.){3}\d{1,3}|(?:[a-fA-F0-9]{1,4}:){1,7}[a-fA-F0-9]{1,4})/', $line, $matches);
+        if (!empty($matches)) {
+            $ipSet[$matches[1]] = true;
+        }
+    }
+}
+
+// Step 2: Clear the table
+$truncateQuery = "TRUNCATE TABLE failed_ips";
+if ($conn->query($truncateQuery) === TRUE) {
+    echo "Table successfully cleared.\n";
+} else {
+    echo "Error clearing table: " . $conn->error . "\n";
+    exit(1);
+}
+
+// Step 3: Insert current IPs
+$stmtInsert = $conn->prepare("INSERT INTO failed_ips (ip_address) VALUES (?)");
+
+foreach (array_keys($ipSet) as $ip) {
+    $stmtInsert->bind_param("s", $ip);
+    $stmtInsert->execute();
+}
+
+$stmtInsert->close();
 $conn->close();
+
+echo "Current IPs successfully synced from log.\n";
 ?>
