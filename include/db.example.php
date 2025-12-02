@@ -3,9 +3,9 @@
 
 // Replace with your actual database credentials
 $host = 'mysql.dmz.daygle.net';
-$username = 'daygle-ssh';
+$username = 'ssh_blocklist';
 $password = 'Secret_Password!';
-$database = 'daygle-ssh';
+$database = 'ssh_blocklist';
 
 // Create a database connection
 $conn = new mysqli($host, $username, $password, $database);
