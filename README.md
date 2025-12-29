@@ -57,7 +57,7 @@ This is ideal for:
 On Ubuntu/Debian:
 
     sudo apt update
-    sudo apt install apache2 php php-mysql mariadb-server git
+    sudo apt install apache2 php php-mysql libapache2-mod-php mariadb-server git
 
 ---
 
@@ -142,68 +142,3 @@ Add:
     */5 * * * * /usr/bin/php /var/www/ssh_blocklist/cronjobs/failed_ssh_login.php > /dev/null 2>&1
 
 This runs the script every 5 minutes.
-
----
-
-### 7. Deploy the web viewer
-
-Then visit in a browser:
-
-    http://ssh.dmz.daygle.net
-
-You should see:
-
-- A list of IPs, one per line, if failed logins were found
-- Or: "No failed login attempts found."
-
----
-
-## Testing
-
-### Generate a failed SSH login
-
-From another machine (or a test host):
-
-    ssh invaliduser@ssh.dmz.daygle.net
-
-Enter any password a few times to trigger failures.
-
-Then run:
-
-    php cronjobs/failed_ssh_login.php
-
-Reload the web page — the source IP you used should now appear.
-
-To verify the journal directly:
-
-    journalctl -u ssh.service --since "5 minutes ago"
-
-You should see lines containing "Failed password for" and the same IP.
-
----
-
-## Project structure
-
-    repo/
-    ├── cronjobs/
-    │   └── failed_ssh_login.php
-    ├── include/
-    │   └── db.php
-    ├── public/
-    │   └── index.php
-    └── README.md
-
----
-
-## Security notes
-
-- Web output uses htmlspecialchars() to avoid XSS
-- Limit access to the web viewer (e.g., HTTP auth, VPN, IP allowlist)
-- Store include/db.php with restrictive permissions, for example:
-
-        chmod 640 include/db.php
-        chown www-data:www-data include/db.php    # or your web user
-
-- The script only reads from journalctl and writes to your DB; it doesn’t modify system auth config
-
-
