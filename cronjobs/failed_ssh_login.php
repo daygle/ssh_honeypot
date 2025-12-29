@@ -18,14 +18,18 @@ if (!file_exists($logFile)) {
 $logContent = file($logFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
 $ipSet = [];
 
-// Regex for IPv4 or IPv6
+// Regex for IPv4 or IPv6 after the word "from"
 $ipRegex = '/from ([0-9a-fA-F\.:]+)/';
 
 foreach ($logContent as $line) {
+
     // Match both:
-    // "Failed password for root"
-    // "Failed password for invalid user admin"
-    if (strpos($line, 'Failed password for') !== false) {
+    // "Failed password for ..."
+    // "Failed keyboard-interactive/pam for ..."
+    if (
+        strpos($line, 'Failed password for') !== false ||
+        strpos($line, 'Failed keyboard-interactive') !== false
+    ) {
         if (preg_match($ipRegex, $line, $matches)) {
             $ip = trim($matches[1]);
             if ($ip !== '') {
