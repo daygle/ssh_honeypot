@@ -36,7 +36,7 @@ This is ideal for:
 - Truncates the failed_ips table
 - Inserts the current unique IPs
 
-### 2. Web viewer (public/index.php)
+### 2. Web Page (public/index.php)
 
 - Connects to the database
 - Fetches entries from failed_ips
