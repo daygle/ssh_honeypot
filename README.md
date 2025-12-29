@@ -29,14 +29,8 @@ This is ideal for:
 
 ### 1. Cronjob script (cronjobs/failed_ssh_login.php)
 
-- Runs:
-
-        journalctl -u ssh.service --no-pager --since "1 hour ago"
-
-- Scans for:
-    - "Failed password for"
-    - "Failed keyboard-interactive"
-
+- Runs 'journalctl -u ssh.service --no-pager --since "1 hour ago"'
+- Scans for "Failed password for" and "Failed keyboard-interactive"
 - Extracts IPv4/IPv6 addresses
 - Deduplicates IPs
 - Truncates the failed_ips table
