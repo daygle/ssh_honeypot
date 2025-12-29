@@ -74,35 +74,32 @@ Log into MariaDB/MySQL:
 
     sudo mysql
 
-Create the database and table:
+Create the database:
 
-    CREATE DATABASE ssh_monitor;
+    CREATE DATABASE ssh_blocklist;
+    EXIT;
 
-    USE ssh_monitor;
+Import the schema from the repository:
 
-    CREATE TABLE failed_ips (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        ip_address VARCHAR(64) NOT NULL,
-        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
+    mysql -u root ssh_blocklist < sql/initial_schema.sql
 
-Create a dedicated user:
+This will create the `failed_ips` table with the following structure:
 
-    CREATE USER 'sshmon'@'localhost' IDENTIFIED BY 'yourpassword';
-    GRANT ALL PRIVILEGES ON ssh_monitor.* TO 'sshmon'@'localhost';
-    FLUSH PRIVILEGES;
+- `id` (auto‑increment primary key)  
+- `ip_address` (VARCHAR(45), UNIQUE)  
+- `timestamp` (DATETIME, defaults to CURRENT_TIMESTAMP)
 
 ---
 
 ### 4. Configure database connection
 
-Edit include/db.php:
+Edit `include/db.php` and set your database credentials:
 
     <?php
     $servername = "localhost";
-    $username = "sshmon";
+    $username = "ssh_blocklist";
     $password = "yourpassword";
-    $dbname = "ssh_monitor";
+    $dbname = "ssh_blocklist";
 
     $conn = new mysqli($servername, $username, $password, $dbname);
 
@@ -111,7 +108,7 @@ Edit include/db.php:
     }
     ?>
 
-Make sure this path matches your actual repo layout.
+Make sure the database name matches the one you created (`ssh_blocklist`).
 
 ---
 
@@ -167,7 +164,7 @@ You should see:
 
 From another machine (or a test host):
 
-    ssh invaliduser@yourserver
+    ssh invaliduser@ssh.dmz.daygle.net
 
 Enter any password a few times to trigger failures.
 
@@ -195,8 +192,6 @@ You should see lines containing "Failed password for" and the same IP.
     ├── public/
     │   └── index.php
     └── README.md
-
-Adjust names/paths if your repo layout differs.
 
 ---
 
