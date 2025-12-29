@@ -108,9 +108,9 @@ Make sure the database name matches the one you created (`ssh_blocklist`).
 
 ### 5. Test the cronjob script
 
-From the repo root:
+Run the following script:
 
-    php cronjobs/failed_ssh_login.php
+    /usr/bin/php /var/www/ssh_blocklist/cronjobs/failed_ssh_login.php
 
 Expected output:
 
@@ -127,7 +127,7 @@ If you see "Failed to read journalctl output.", ensure:
 
 ### 6. Set up the cronjob
 
-Edit root’s crontab:
+Edit the root’s crontab:
 
     sudo crontab -e
 
@@ -135,4 +135,4 @@ Add:
 
     */5 * * * * /usr/bin/php /var/www/ssh_blocklist/cronjobs/failed_ssh_login.php > /dev/null 2>&1
 
-This runs the script every 5 minutes.
+Runs script every 5 minutes.
