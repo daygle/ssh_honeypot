@@ -63,10 +63,8 @@ On Ubuntu/Debian:
 
 ### 2. Clone the repository
 
-    git clone https://gitlab.com/your/repo.git
-    cd repo
-
-Replace the URL with your actual GitLab repo.
+    cd /var/www/
+    git clone https://gitlab.com/daygle/ssh_blocklist.git
 
 ---
 
@@ -144,7 +142,7 @@ Edit root’s crontab:
 
 Add:
 
-    */5 * * * * /usr/bin/php /var/www/ssh_blocklist/cronjobs/failed_ssh_login.php >/dev/null 2>&1
+    */5 * * * * /usr/bin/php /var/www/ssh_blocklist/cronjobs/failed_ssh_login.php > /dev/null 2>&1
 
 This runs the script every 5 minutes.
 
