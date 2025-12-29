@@ -5,27 +5,19 @@
 chdir(dirname(__FILE__));
 require_once "../include/db.php";
 
-// Path to the auth log file
-$logFile = '/var/log/auth.log';
+// Step 1: Run journalctl to get recent SSH login failures
+$cmd = 'journalctl -u ssh.service --no-pager --since "1 hour ago"';
+exec($cmd, $logLines, $exitCode);
 
-// Check if the log file exists
-if (!file_exists($logFile)) {
-    echo "Log file missing. Please verify the path.\n";
+if ($exitCode !== 0 || empty($logLines)) {
+    echo "Failed to read journalctl output.\n";
     exit(1);
 }
 
-// Step 1: Extract IPs from the log file
-$logContent = file($logFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
 $ipSet = [];
-
-// Regex for IPv4 or IPv6 after the word "from"
 $ipRegex = '/from ([0-9a-fA-F\.:]+)/';
 
-foreach ($logContent as $line) {
-
-    // Match both:
-    // "Failed password for ..."
-    // "Failed keyboard-interactive/pam for ..."
+foreach ($logLines as $line) {
     if (
         strpos($line, 'Failed password for') !== false ||
         strpos($line, 'Failed keyboard-interactive') !== false
@@ -59,5 +51,5 @@ foreach (array_keys($ipSet) as $ip) {
 $stmtInsert->close();
 $conn->close();
 
-echo "Current IPs successfully synced from log.\n";
+echo "Current IPs successfully synced from journal.\n";
 ?>
