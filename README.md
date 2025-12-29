@@ -57,7 +57,7 @@ This is ideal for:
 On Ubuntu/Debian:
 
     sudo apt update
-    sudo apt install php php-mysql mariadb-server git
+    sudo apt install apache2 php php-mysql mariadb-server git
 
 ---
 
@@ -144,9 +144,7 @@ Edit root’s crontab:
 
 Add:
 
-    */5 * * * * /usr/bin/php /path/to/repo/cronjobs/failed_ssh_login.php >/dev/null 2>&1
-
-Replace /path/to/repo with the actual path on your server.
+    */5 * * * * /usr/bin/php /var/www/ssh_blocklist/cronjobs/failed_ssh_login.php >/dev/null 2>&1
 
 This runs the script every 5 minutes.
 
@@ -154,13 +152,9 @@ This runs the script every 5 minutes.
 
 ### 7. Deploy the web viewer
 
-Assuming your web root is /var/www/html:
-
-    sudo ln -s /path/to/repo/public /var/www/html/ssh-monitor
-
 Then visit in a browser:
 
-    http://yourserver/ssh-monitor/
+    http://ssh.dmz.daygle.net
 
 You should see:
 
@@ -219,12 +213,4 @@ Adjust names/paths if your repo layout differs.
 
 - The script only reads from journalctl and writes to your DB; it doesn’t modify system auth config
 
----
 
-## Future enhancements
-
-- GeoIP lookup for each IP
-- Historical tracking instead of truncating failed_ips
-- JSON API endpoint for integration with other tools
-- Graphs/visualizations of failed attempts over time
-- Integration with OPNsense/CrowdSec or custom blocklists
