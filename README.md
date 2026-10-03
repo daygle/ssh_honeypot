@@ -1,4 +1,7 @@
-# SSH Sentinel
+# Daygle SSH Honeypot
+
+[![CI](https://github.com/daygle/ssh_honeypot/actions/workflows/ci.yml/badge.svg)](https://github.com/daygle/ssh_honeypot/actions/workflows/ci.yml)
+[![Docker Publish](https://github.com/daygle/ssh_honeypot/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/daygle/ssh_honeypot/actions/workflows/docker-publish.yml)
 
 A self-hosted SSH honeypot that records every connection attempt to your server and
 publishes the results as a live HTML dashboard.
@@ -22,21 +25,21 @@ loss between runs, and nothing to migrate.
 
 Both services run in **one container** from **one `docker compose up`**:
 
-- **Honeypot** — an `asyncssh` server that looks like OpenSSH, advertises a plausible
+- **Honeypot** - an `asyncssh` server that looks like OpenSSH, advertises a plausible
   banner, accepts every connection, records every credential guess, and then refuses
   authentication *always*. It never opens a shell and never grants access.
-- **Dashboard** — a FastAPI + Jinja2 page with probe volume, unique IPs, top offenders,
-  recent activity, and a blocklist feed you can pipe into a firewall.
+- **Dashboard** - a FastAPI + Jinja2 page with probe volume, unique IPs, top offenders,
+  recent activity, and an SSH blocklist feed you can pipe into a firewall.
 
 Every TCP connection is recorded at connect time, so even non-SSH garbage probes
 (port scanners, vulnerability sweeps) show up with their source IP.
 
 ---
 
-## ⚠️ Port 22 cutover — read before starting
+## ⚠️ Port 22 cutover - read before starting
 
 The honeypot takes **host port 22**. If your real SSH daemon is still on 22 when you
-start this, either the honeypot won't bind or — worse — you move your own access out
+start this, either the honeypot won't bind or - worse - you move your own access out
 of the way without a replacement. Do it in this order, **keeping your current SSH
 session open the whole time**:
 
@@ -65,13 +68,18 @@ Prefer to leave sshd on 22? Change the mapping in `docker-compose.yml`
 ## Quick start
 
 ```bash
-git clone <this repo> && cd ssh_blocklist
+git clone <this repo> && cd ssh_honeypot
 docker compose up -d --build
 ```
 
 Dashboard: `http://your-server:8080`
 
-State (SQLite DB + generated SSH host key) lives in the `sentinel-data` Docker
+Prefer a prebuilt image? CI publishes one to GitHub Container Registry on every push
+to `main` and every `v*` tag. Replace `build: .` in `docker-compose.yml` with:
+
+    image: ghcr.io/daygle/ssh_honeypot:latest
+
+State (SQLite DB + generated SSH host key) lives in the `daygle-data` Docker
 volume, so rebuilds and upgrades never lose history.
 
 Stop / remove:
@@ -104,7 +112,7 @@ Environment variables (set under `environment:` in `docker-compose.yml`):
 | `/` | Live HTML dashboard (auto-refreshes every 30s) |
 | `/api/stats` | JSON summary: counters, top IPs, hourly volume, recent events |
 | `/api/ips` | JSON per-IP aggregates (connections, auth attempts, first/last seen) |
-| `/blocklist.txt` | Unique source IPs, one per line — same shape as the old page |
+| `/ssh-blocklist.txt` | Unique source IPs, one per line - same shape as the old page |
 | `/export.csv` | Full event history as CSV |
 | `/healthz` | Health probe |
 
@@ -112,7 +120,7 @@ Environment variables (set under `environment:` in `docker-compose.yml`):
 
 ```bash
 # ufw: block every IP the honeypot has seen
-for ip in $(curl -s http://localhost:8080/blocklist.txt); do sudo ufw deny from "$ip"; done
+for ip in $(curl -s http://localhost:8080/ssh-blocklist.txt); do sudo ufw deny from "$ip"; done
 ```
 
 The text endpoint is deliberately plain, so it also drops straight into fail2ban
@@ -134,6 +142,22 @@ The app runs without binding privileges in dev: set `HONEYPOT_PORT` to a high po
 
 ---
 
+## Continuous Integration
+
+GitHub Actions workflows (`.github/workflows/`):
+
+- **CI** - runs on every push and pull request: the full test suite on Python 3.10,
+  3.11 and 3.12, plus a Docker job that validates `docker-compose.yml`, builds the
+  image and smoke-tests the dashboard, health endpoint and SSH blocklist feed inside the
+  running container.
+- **Docker Publish** - on pushes to `main` and `v*` tags, builds and publishes the
+  image to GitHub Container Registry as `ghcr.io/daygle/ssh_honeypot`.
+
+Dependabot (`.github/dependabot.yml`) opens weekly update PRs for the Python
+dependencies, the Docker base image and the GitHub Actions used by the workflows.
+
+---
+
 ## Security notes
 
 - The honeypot **never authenticates** anyone: every password and public key is
@@ -141,7 +165,7 @@ The app runs without binding privileges in dev: set `HONEYPOT_PORT` to a high po
 - The container runs as an unprivileged user with a read-only filesystem, dropped
   capabilities and `no-new-privileges`.
 - The dashboard is intentionally unauthenticated because it contains only honeypot
-  data — but if you expose it publicly, put it behind a reverse proxy with TLS
+  data - but if you expose it publicly, put it behind a reverse proxy with TLS
   and access control (e.g. Caddy/nginx + basic auth).
 - Recorded passwords are attacker guesses stored as evidence. Treat the export as
   sensitive-ish data and don't reuse it anywhere.
@@ -154,5 +178,5 @@ The app runs without binding privileges in dev: set `HONEYPOT_PORT` to a high po
 |---|---|
 | `journalctl` cron parser | Decoy SSH service capturing probes directly |
 | MySQL (`failed_ips`) + `TRUNCATE` cron | SQLite written in real time |
-| `public/index.php` IP list | Live dashboard + `/blocklist.txt` + JSON API + CSV export |
+| `public/index.php` IP list | Live dashboard + `/ssh-blocklist.txt` + JSON API + CSV export |
 | Bare-metal LAMP install | One hardened Docker container |

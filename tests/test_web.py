@@ -27,7 +27,7 @@ def test_dashboard_renders_ip_list(client):
 
     assert res.status_code == 200
     html = res.text
-    assert "SSH Sentinel" in html
+    assert "Daygle SSH Honeypot" in html
     assert "203.0.113.9" in html
     assert "198.51.100.7" in html
     assert "root" in html
@@ -65,11 +65,14 @@ def test_api_ips(client):
 def test_blocklist_txt(client):
     _seed()
 
-    res = client.get("/blocklist.txt")
+    res = client.get("/ssh-blocklist.txt")
 
     assert res.status_code == 200
     assert res.headers["content-type"].startswith("text/plain")
     assert set(res.text.splitlines()) == {"203.0.113.9", "198.51.100.7"}
+
+    # The endpoint was renamed; the old path must be gone.
+    assert client.get("/blocklist.txt").status_code == 404
 
 
 def test_export_csv(client):

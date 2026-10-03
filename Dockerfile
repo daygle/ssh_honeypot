@@ -4,7 +4,7 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
-WORKDIR /srv/sentinel
+WORKDIR /srv/daygle
 
 COPY requirements.txt ./
 RUN pip install -r requirements.txt
@@ -12,11 +12,11 @@ RUN pip install -r requirements.txt
 COPY app ./app
 
 # Unprivileged runtime user; all state lives in the /data volume.
-RUN useradd --system --create-home --uid 10001 sentinel \
+RUN useradd --system --create-home --uid 10001 daygle \
     && mkdir -p /data \
-    && chown sentinel:sentinel /data
+    && chown daygle:daygle /data
 
-USER sentinel
+USER daygle
 
 ENV DATA_DIR=/data \
     WEB_PORT=8080 \

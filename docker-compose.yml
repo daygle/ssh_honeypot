@@ -1,10 +1,10 @@
 services:
-  sentinel:
+  daygle-ssh-honeypot:
     build: .
-    container_name: ssh-sentinel
+    container_name: daygle-ssh-honeypot
     restart: unless-stopped
     ports:
-      # The honeypot owns port 22 — see README "Port 22 cutover" before starting.
+      # The honeypot owns port 22 - see README "Port 22 cutover" before starting.
       - "22:22"
       # Dashboard (put a reverse proxy + TLS in front for public access).
       - "8080:8080"
@@ -14,7 +14,7 @@ services:
       WEB_PORT: "8080"
       # HONEYPOT_BANNER: "SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13"
     volumes:
-      - sentinel-data:/data
+      - daygle-data:/data
     # Hardening: the honeypot faces the internet, so keep it locked down.
     cap_drop:
       - ALL
@@ -30,4 +30,4 @@ services:
         max-file: "3"
 
 volumes:
-  sentinel-data:
+  daygle-data:

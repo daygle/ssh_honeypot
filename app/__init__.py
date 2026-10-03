@@ -1,1 +1,1 @@
-"""Package marker for SSH Sentinel."""
+"""Daygle SSH Honeypot - package marker."""

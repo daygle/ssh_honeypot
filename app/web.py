@@ -13,7 +13,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from . import config, db, honeypot
 
-log = logging.getLogger("sentinel.web")
+log = logging.getLogger("daygle.web")
 
 templates = Environment(
     loader=FileSystemLoader(Path(__file__).resolve().parent / "templates"),
@@ -34,12 +34,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except OSError as exc:
         # Preview environments cannot bind privileged/decoy ports; the
         # dashboard still runs so the UI is inspectable.
-        log.warning("honeypot listener not started (%s) — dashboard only", exc)
+        log.warning("honeypot listener not started (%s) - dashboard only", exc)
     yield
     await honeypot.stop(acceptor)
 
 
-app = FastAPI(title="SSH Sentinel", lifespan=lifespan)
+app = FastAPI(title="Daygle SSH Honeypot", lifespan=lifespan)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -61,7 +61,7 @@ def api_ips() -> list[dict[str, Any]]:
     return db.get_ip_rows()
 
 
-@app.get("/blocklist.txt")
+@app.get("/ssh-blocklist.txt")
 def blocklist() -> PlainTextResponse:
     return PlainTextResponse(db.blocklist_text(), media_type="text/plain")
 
@@ -71,7 +71,7 @@ def export_csv() -> Response:
     return Response(
         db.events_csv(),
         media_type="text/csv",
-        headers={"Content-Disposition": 'attachment; filename="ssh-sentinel-events.csv"'},
+        headers={"Content-Disposition": 'attachment; filename="daygle-ssh-honeypot-events.csv"'},
     )
 
 

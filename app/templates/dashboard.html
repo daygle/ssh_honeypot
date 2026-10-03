@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SSH Sentinel — honeypot connection watchtower</title>
+<title>Daygle SSH Honeypot - Connection Watchtower</title>
 <meta name="description" content="Self-hosted SSH honeypot dashboard: every connection attempt to port 22, recorded and on display.">
 <style>
   :root {
@@ -90,7 +90,7 @@
   .clock { color: var(--dim); font-size: .82rem; }
   .pill {
     display: inline-flex; align-items: center; gap: .5rem;
-    font-size: .74rem; letter-spacing: .12em; text-transform: uppercase;
+    font-size: .74rem; letter-spacing: .12em;
     color: var(--emerald);
     background: rgba(47, 214, 147, .09);
     border: 1px solid rgba(47, 214, 147, .3);
@@ -108,7 +108,7 @@
   .hero { padding: 4.25rem 0 2.75rem; }
   .eyebrow {
     display: inline-flex; align-items: center; gap: .55rem;
-    font-size: .74rem; letter-spacing: .18em; text-transform: uppercase;
+    font-size: .74rem; letter-spacing: .18em;
     color: var(--sky);
     border: 1px solid rgba(76, 194, 255, .28);
     background: rgba(76, 194, 255, .07);
@@ -177,7 +177,7 @@
   }
   .stat:hover { border-color: rgba(76, 194, 255, .38); transform: translateY(-2px); }
   .stat-label {
-    font-size: .72rem; letter-spacing: .13em; text-transform: uppercase;
+    font-size: .72rem; letter-spacing: .13em;
     color: var(--dim); margin-bottom: .55rem;
     display: flex; align-items: center; gap: .5rem;
   }
@@ -266,7 +266,7 @@
   table { width: 100%; border-collapse: collapse; min-width: 780px; }
   thead th {
     text-align: left;
-    font-size: .71rem; letter-spacing: .13em; text-transform: uppercase;
+    font-size: .71rem; letter-spacing: .13em;
     color: var(--dim); font-weight: 560;
     padding: .55rem .9rem;
     border-bottom: 1px solid var(--line);
@@ -365,16 +365,16 @@
           <path d="M9 12l2 2 4-4"></path>
         </svg>
       </span>
-      <span class="brand-name">SSH <span>Sentinel</span></span>
+      <span class="brand-name">Daygle <span>SSH Honeypot</span></span>
     </a>
     <nav class="topnav">
       <a href="#overview">Overview</a>
       <a href="#activity">Activity</a>
-      <a href="#feed">Blocklist feed</a>
+      <a href="#feed">SSH Blocklist Feed</a>
     </nav>
     <div class="top-right">
       <span class="clock mono" id="utc-clock">--:--:-- UTC</span>
-      <span class="pill" id="pill"><span class="dot"></span><span id="pill-text">Live · port {{ honeypot_port }}</span></span>
+      <span class="pill" id="pill"><span class="dot"></span><span id="pill-text">Live · Port {{ honeypot_port }}</span></span>
     </div>
   </div>
 </header>
@@ -383,25 +383,25 @@
   <section class="hero wrap">
     <span class="eyebrow">
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
-      Honeypot · connection watchtower
+      Honeypot · Connection Watchtower
     </span>
-    <h1>Every hand that reaches for <em>port 22</em> — on the record.</h1>
+    <h1>Every hand that reaches for <em>port 22</em> - on the record.</h1>
     <p class="lede">
       This server runs a decoy SSH service. It accepts every connection, captures the source IP,
       client banner and credential guesses, then turns every probe away. Nothing is trusted,
-      nothing is granted — just observed and filed.
+      nothing is granted - just observed and filed.
     </p>
     <div class="hero-actions">
       <a class="btn btn-primary" href="/export.csv">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"></path><path d="M7 11l5 5 5-5"></path><path d="M5 21h14"></path></svg>
-        Export events (CSV)
+        Export Events (CSV)
       </a>
-      <a class="btn btn-ghost" href="/blocklist.txt">Raw IP blocklist</a>
+      <a class="btn btn-ghost" href="/ssh-blocklist.txt">Raw IP SSH Blocklist</a>
       <a class="btn btn-ghost" href="/api/stats">JSON API</a>
     </div>
     <div class="hero-meta">
-      <span>Last contact <strong id="hero-last" class="mono">{{ stats.last_seen or 'never' }}</strong></span>
-      <span>Captured live into <code>SQLite</code></span>
+      <span>Last Contact <strong id="hero-last" class="mono">{{ stats.last_seen or 'Never' }}</strong></span>
+      <span>Captured Live Into <code>SQLite</code></span>
       <span>Feed it to <code>fail2ban</code>, <code>ufw</code> or any firewall</span>
     </div>
   </section>
@@ -414,7 +414,7 @@
           Connections · 24h
         </div>
         <div class="stat-value" id="stat-conn24">{{ stats.connections_24h }}</div>
-        <div class="stat-sub" id="stat-conn-total">{{ stats.connections_total }} all-time</div>
+        <div class="stat-sub" id="stat-conn-total">{{ stats.connections_total }} All-Time</div>
       </article>
       <article class="stat">
         <div class="stat-label">
@@ -422,31 +422,31 @@
           Unique IPs
         </div>
         <div class="stat-value accent" id="stat-ips">{{ stats.unique_ips }}</div>
-        <div class="stat-sub" id="stat-ips-24">{{ stats.unique_ips_24h }} seen in the last 24h</div>
+        <div class="stat-sub" id="stat-ips-24">{{ stats.unique_ips_24h }} Seen In The Last 24h</div>
       </article>
       <article class="stat">
         <div class="stat-label">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="10" width="16" height="10" rx="2"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg>
-          Credential attempts · 24h
+          Credential Attempts · 24h
         </div>
         <div class="stat-value warn" id="stat-auth">{{ stats.auth_24h }}</div>
-        <div class="stat-sub" id="stat-auth-total">{{ stats.auth_total }} all-time</div>
+        <div class="stat-sub" id="stat-auth-total">{{ stats.auth_total }} All-Time</div>
       </article>
       <article class="stat">
         <div class="stat-label">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
-          Last contact
+          Last Contact
         </div>
-        <div class="stat-value" id="stat-last">{{ stats.last_seen or '—' }}</div>
-        <div class="stat-sub" id="stat-last-sub">{{ stats.last_seen or 'no attempts recorded yet' }}</div>
+        <div class="stat-value" id="stat-last">{{ stats.last_seen or '-' }}</div>
+        <div class="stat-sub" id="stat-last-sub">{{ stats.last_seen or 'No Attempts Recorded Yet' }}</div>
       </article>
     </div>
 
     <div class="grid-two">
       <article class="panel">
         <div class="panel-head">
-          <h2>Top offenders</h2>
-          <span class="hint">by connections</span>
+          <h2>Top Offenders</h2>
+          <span class="hint">By Connections</span>
         </div>
         <ol class="offenders" id="offenders">
           {% set max_conn = (stats.top_ips | map(attribute='connections') | max) if stats.top_ips else 0 %}
@@ -464,13 +464,13 @@
 
       <article class="panel">
         <div class="panel-head">
-          <h2>Probe volume</h2>
-          <span class="hint">connections per hour · last 24h</span>
+          <h2>Probe Volume</h2>
+          <span class="hint">Connections Per Hour · Last 24h</span>
         </div>
         <div class="chart" id="hourly">
           {% set max_h = (stats.hourly | map(attribute='count') | max) if stats.hourly else 0 %}
           {% for b in stats.hourly %}
-          <div class="bar-col" title="{{ b.label }} UTC — {{ b.count }} connections" style="height: {{ (b.count * 100 / max_h) | round(1) if (max_h and b.count) else 3 }}%"></div>
+          <div class="bar-col" title="{{ b.label }} UTC - {{ b.count }} connections" style="height: {{ (b.count * 100 / max_h) | round(1) if (max_h and b.count) else 3 }}%"></div>
           {% endfor %}
         </div>
         <div class="chart-axis">
@@ -483,8 +483,8 @@
 
     <article class="panel" id="activity">
       <div class="panel-head">
-        <h2>Recent activity</h2>
-        <span class="hint">newest first</span>
+        <h2>Recent Activity</h2>
+        <span class="hint">Newest First</span>
         <span class="spacer"></span>
         <a class="chip" href="/export.csv">Export CSV</a>
       </div>
@@ -498,7 +498,7 @@
               <th>Event</th>
               <th>Username</th>
               <th>Credential</th>
-              <th>Client banner</th>
+              <th>Client Banner</th>
             </tr>
           </thead>
           <tbody id="recent-body">
@@ -506,14 +506,14 @@
             <tr>
               <td class="mono muted">{{ e.ts.replace('T', ' ').replace('Z', '') }}</td>
               <td class="mono">{{ e.ip }}</td>
-              <td class="mono dimmed">{{ e.ip_port if e.ip_port is not none else '—' }}</td>
+              <td class="mono dimmed">{{ e.ip_port if e.ip_port is not none else '-' }}</td>
               <td><span class="badge ev-{{ e.event }}">{{ e.event }}</span></td>
-              <td class="mono muted">{{ e.username or '—' }}</td>
-              <td class="mono muted">{{ e.detail or '—' }}</td>
-              <td class="mono dimmed">{{ e.client_version or '—' }}</td>
+              <td class="mono muted">{{ e.username or '-' }}</td>
+              <td class="mono muted">{{ e.detail or '-' }}</td>
+              <td class="mono dimmed">{{ e.client_version or '-' }}</td>
             </tr>
             {% else %}
-            <tr class="empty-row"><td colspan="7">No attempts recorded yet — the honeypot is listening.</td></tr>
+            <tr class="empty-row"><td colspan="7">No attempts recorded yet - the honeypot is listening.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -522,11 +522,11 @@
 
     <article class="panel" id="feed" style="margin-top: 1rem;">
       <div class="panel-head">
-        <h2>Blocklist feed</h2>
-        <span class="hint">unique source IPs, most recent first</span>
+        <h2>SSH Blocklist Feed</h2>
+        <span class="hint">Unique Source IPs, Most Recent First</span>
         <div class="feed-head-actions">
-          <button class="chip" id="copy-ips" type="button">Copy all IPs</button>
-          <a class="chip" href="/blocklist.txt">blocklist.txt</a>
+          <button class="chip" id="copy-ips" type="button">Copy All IPs</button>
+          <a class="chip" href="/ssh-blocklist.txt">ssh-blocklist.txt</a>
         </div>
       </div>
       <ul class="feed" id="feed-list">
@@ -545,11 +545,11 @@
 
 <footer>
   <div class="wrap">
-    <span>SSH Sentinel · self-hosted honeypot · events stored in SQLite · rendered {{ stats.generated_at }}</span>
+    <span>Daygle SSH Honeypot · self-hosted · events stored in SQLite · rendered {{ stats.generated_at }}</span>
     <nav class="links">
       <a href="/api/stats">/api/stats</a>
       <a href="/api/ips">/api/ips</a>
-      <a href="/blocklist.txt">/blocklist.txt</a>
+      <a href="/ssh-blocklist.txt">/ssh-blocklist.txt</a>
       <a href="/export.csv">/export.csv</a>
       <a href="/healthz">/healthz</a>
     </nav>
@@ -566,11 +566,11 @@
   }
 
   function fmtTs(ts) {
-    return ts ? ts.replace('T', ' ').replace('Z', '') + ' UTC' : '—';
+    return ts ? ts.replace('T', ' ').replace('Z', '') + ' UTC' : '-';
   }
 
   function fmtRel(ts) {
-    if (!ts) return 'never';
+    if (!ts) return 'Never';
     const diff = Math.max(0, Date.now() - Date.parse(ts));
     const mins = Math.floor(diff / 60000);
     if (mins < 1) return 'just now';
@@ -582,13 +582,13 @@
 
   function renderStats(s) {
     $('#stat-conn24').textContent = s.connections_24h.toLocaleString();
-    $('#stat-conn-total').textContent = s.connections_total.toLocaleString() + ' all-time';
+    $('#stat-conn-total').textContent = s.connections_total.toLocaleString() + ' All-Time';
     $('#stat-ips').textContent = s.unique_ips.toLocaleString();
-    $('#stat-ips-24').textContent = s.unique_ips_24h.toLocaleString() + ' seen in the last 24h';
+    $('#stat-ips-24').textContent = s.unique_ips_24h.toLocaleString() + ' Seen In The Last 24h';
     $('#stat-auth').textContent = s.auth_24h.toLocaleString();
-    $('#stat-auth-total').textContent = s.auth_total.toLocaleString() + ' all-time';
+    $('#stat-auth-total').textContent = s.auth_total.toLocaleString() + ' All-Time';
     $('#stat-last').textContent = fmtRel(s.last_seen);
-    $('#stat-last-sub').textContent = s.last_seen ? fmtTs(s.last_seen) : 'no attempts recorded yet';
+    $('#stat-last-sub').textContent = s.last_seen ? fmtTs(s.last_seen) : 'No Attempts Recorded Yet';
     $('#hero-last').textContent = fmtRel(s.last_seen);
   }
 
@@ -605,7 +605,7 @@
   function renderHourly(hours) {
     const max = Math.max(1, ...hours.map((h) => h.count));
     $('#hourly').innerHTML = hours.map((h) => `
-      <div class="bar-col" title="${esc(h.label)} UTC — ${h.count} connections"
+      <div class="bar-col" title="${esc(h.label)} UTC - ${h.count} connections"
            style="height:${h.count ? Math.max(3, (h.count * 100) / max) : 3}%"></div>`).join('');
   }
 
@@ -614,12 +614,12 @@
       <tr>
         <td class="mono muted">${esc(fmtTs(e.ts))}</td>
         <td class="mono">${esc(e.ip)}</td>
-        <td class="mono dimmed">${e.ip_port ?? '—'}</td>
+        <td class="mono dimmed">${e.ip_port ?? '-'}</td>
         <td><span class="badge ev-${esc(e.event)}">${esc(e.event)}</span></td>
-        <td class="mono muted">${esc(e.username) || '—'}</td>
-        <td class="mono muted">${esc(e.detail) || '—'}</td>
-        <td class="mono dimmed">${esc(e.client_version) || '—'}</td>
-      </tr>`).join('') : '<tr class="empty-row"><td colspan="7">No attempts recorded yet — the honeypot is listening.</td></tr>';
+        <td class="mono muted">${esc(e.username) || '-'}</td>
+        <td class="mono muted">${esc(e.detail) || '-'}</td>
+        <td class="mono dimmed">${esc(e.client_version) || '-'}</td>
+      </tr>`).join('') : '<tr class="empty-row"><td colspan="7">No attempts recorded yet - the honeypot is listening.</td></tr>';
   }
 
   function renderFeed(rows) {
@@ -642,11 +642,11 @@
       renderFeed(s.ips);
       const pill = $('#pill');
       pill.classList.remove('stale');
-      $('#pill-text').textContent = 'Live · port {{ honeypot_port }}';
+      $('#pill-text').textContent = 'Live · Port {{ honeypot_port }}';
     } catch (err) {
       const pill = $('#pill');
       pill.classList.add('stale');
-      $('#pill-text').textContent = 'Feed stale';
+      $('#pill-text').textContent = 'Feed Stale';
     }
   }
 
@@ -656,12 +656,12 @@
 
   $('#copy-ips').addEventListener('click', async () => {
     try {
-      const text = await (await fetch('/blocklist.txt')).text();
+      const text = await (await fetch('/ssh-blocklist.txt')).text();
       await navigator.clipboard.writeText(text.trim());
       $('#copy-ips').textContent = 'Copied ✓';
-      setTimeout(() => { $('#copy-ips').textContent = 'Copy all IPs'; }, 1600);
+      setTimeout(() => { $('#copy-ips').textContent = 'Copy All IPs'; }, 1600);
     } catch (err) {
-      $('#copy-ips').textContent = 'Copy failed';
+      $('#copy-ips').textContent = 'Copy Failed';
     }
   });
 

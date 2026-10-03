@@ -16,7 +16,7 @@ import asyncssh
 
 from . import config, db
 
-log = logging.getLogger("sentinel.honeypot")
+log = logging.getLogger("daygle.honeypot")
 
 
 def _peer(conn: Any) -> tuple[str, Optional[int]]:
@@ -33,7 +33,7 @@ def _client_version(conn: Any) -> Optional[str]:
     return str(raw) if raw else None
 
 
-class SentinelSSHServer(asyncssh.SSHServer):
+class DaygleSSHServer(asyncssh.SSHServer):
     """Records connection metadata and credential guesses; grants nothing."""
 
     def connection_made(self, conn: Any) -> None:
@@ -108,7 +108,7 @@ async def start() -> Any:
     acceptor = await asyncssh.listen(
         config.HONEYPOT_HOST,
         config.HONEYPOT_PORT,
-        server_factory=SentinelSSHServer,
+        server_factory=DaygleSSHServer,
         server_host_keys=[_load_or_create_host_key()],
         server_version=config.HONEYPOT_BANNER,
     )
