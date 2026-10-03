@@ -1,0 +1,674 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SSH Sentinel — honeypot connection watchtower</title>
+<meta name="description" content="Self-hosted SSH honeypot dashboard: every connection attempt to port 22, recorded and on display.">
+<style>
+  :root {
+    --bg: #070b12;
+    --panel: #0c1420;
+    --panel-2: #101b2b;
+    --line: #1b2a3e;
+    --line-soft: rgba(27, 42, 62, .55);
+    --text: #e6eef8;
+    --muted: #8ba0ba;
+    --dim: #5c7089;
+    --amber: #f6b93b;
+    --emerald: #2fd693;
+    --sky: #4cc2ff;
+    --rose: #ff6b81;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    background:
+      radial-gradient(1100px 520px at 85% -10%, rgba(76, 194, 255, .10), transparent 62%),
+      radial-gradient(900px 480px at 8% 112%, rgba(246, 185, 59, .07), transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .bg-grid {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background-image:
+      linear-gradient(rgba(76, 194, 255, .045) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(76, 194, 255, .045) 1px, transparent 1px);
+    background-size: 56px 56px;
+    mask-image: radial-gradient(1200px 700px at 50% 0%, #000 0%, transparent 78%);
+    -webkit-mask-image: radial-gradient(1200px 700px at 50% 0%, #000 0%, transparent 78%);
+    z-index: 0;
+  }
+
+  main, header, footer { position: relative; z-index: 1; }
+
+  .wrap { width: min(1180px, 100% - 2.5rem); margin-inline: auto; }
+
+  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  /* ---------- top bar ---------- */
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    backdrop-filter: blur(12px);
+    background: rgba(7, 11, 18, .82);
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .topbar .wrap {
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+    padding: .85rem 0;
+  }
+  .brand { display: flex; align-items: center; gap: .65rem; text-decoration: none; color: var(--text); }
+  .brand-mark {
+    width: 34px; height: 34px; display: grid; place-items: center;
+    border-radius: 9px;
+    background: linear-gradient(150deg, rgba(76, 194, 255, .22), rgba(47, 214, 147, .12));
+    border: 1px solid rgba(76, 194, 255, .35);
+  }
+  .brand-name { font-weight: 650; letter-spacing: -.01em; font-size: 1.02rem; }
+  .brand-name span { color: var(--sky); }
+  .topnav { display: flex; gap: 1.4rem; margin-left: .5rem; }
+  .topnav a { color: var(--muted); text-decoration: none; font-size: .86rem; letter-spacing: .01em; }
+  .topnav a:hover { color: var(--text); }
+  .top-right { margin-left: auto; display: flex; align-items: center; gap: .9rem; }
+  .clock { color: var(--dim); font-size: .82rem; }
+  .pill {
+    display: inline-flex; align-items: center; gap: .5rem;
+    font-size: .74rem; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--emerald);
+    background: rgba(47, 214, 147, .09);
+    border: 1px solid rgba(47, 214, 147, .3);
+    padding: .32rem .75rem; border-radius: 999px;
+  }
+  .pill.stale { color: var(--amber); background: rgba(246, 185, 59, .09); border-color: rgba(246, 185, 59, .3); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 0 currentColor; animation: pulse 2.2s infinite; }
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(47, 214, 147, .5); }
+    70% { box-shadow: 0 0 0 7px rgba(47, 214, 147, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(47, 214, 147, 0); }
+  }
+
+  /* ---------- hero ---------- */
+  .hero { padding: 4.25rem 0 2.75rem; }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: .55rem;
+    font-size: .74rem; letter-spacing: .18em; text-transform: uppercase;
+    color: var(--sky);
+    border: 1px solid rgba(76, 194, 255, .28);
+    background: rgba(76, 194, 255, .07);
+    padding: .35rem .8rem; border-radius: 999px;
+    margin-bottom: 1.35rem;
+  }
+  .hero h1 {
+    font-size: clamp(2.1rem, 4.6vw, 3.65rem);
+    line-height: 1.06;
+    letter-spacing: -.025em;
+    font-weight: 680;
+    margin: 0 0 1.1rem;
+    max-width: 21ch;
+  }
+  .hero h1 em { font-style: normal; color: var(--emerald); }
+  .hero p.lede {
+    color: var(--muted);
+    font-size: 1.08rem;
+    max-width: 62ch;
+    margin: 0 0 1.6rem;
+  }
+  .hero-actions { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; }
+  .btn {
+    display: inline-flex; align-items: center; gap: .55rem;
+    padding: .68rem 1.15rem;
+    border-radius: 10px;
+    font-size: .9rem; font-weight: 560;
+    text-decoration: none;
+    border: 1px solid transparent;
+    transition: transform .12s ease, background .15s ease, border-color .15s ease;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn-primary { background: var(--sky); color: #04121d; }
+  .btn-primary:hover { background: #6bcfff; }
+  .btn-ghost { border-color: var(--line); color: var(--text); background: rgba(16, 27, 43, .5); }
+  .btn-ghost:hover { border-color: rgba(76, 194, 255, .5); }
+  .hero-meta {
+    margin-top: 1.6rem;
+    display: flex; flex-wrap: wrap; gap: .55rem 1.35rem;
+    color: var(--dim); font-size: .82rem;
+  }
+  .hero-meta span { display: inline-flex; align-items: center; gap: .45rem; }
+  .hero-meta code {
+    font-family: var(--mono);
+    color: var(--muted);
+    background: rgba(16, 27, 43, .7);
+    border: 1px solid var(--line-soft);
+    border-radius: 6px;
+    padding: .12rem .45rem;
+    font-size: .78rem;
+  }
+
+  /* ---------- stats ---------- */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1rem;
+    margin: .5rem 0 1.15rem;
+  }
+  .stat {
+    background: linear-gradient(180deg, var(--panel-2), var(--panel));
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 1.15rem 1.25rem 1.05rem;
+    transition: border-color .15s ease, transform .15s ease;
+  }
+  .stat:hover { border-color: rgba(76, 194, 255, .38); transform: translateY(-2px); }
+  .stat-label {
+    font-size: .72rem; letter-spacing: .13em; text-transform: uppercase;
+    color: var(--dim); margin-bottom: .55rem;
+    display: flex; align-items: center; gap: .5rem;
+  }
+  .stat-label svg { opacity: .8; }
+  .stat-value {
+    font-family: var(--mono);
+    font-size: 2.15rem; font-weight: 620; letter-spacing: -.02em;
+    line-height: 1.1;
+  }
+  .stat-value.accent { color: var(--emerald); }
+  .stat-value.warn { color: var(--amber); }
+  .stat-sub { color: var(--muted); font-size: .82rem; margin-top: .35rem; }
+
+  /* ---------- panels ---------- */
+  .grid-two {
+    display: grid;
+    grid-template-columns: 1.05fr 1fr;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+  .panel {
+    background: linear-gradient(180deg, rgba(16, 27, 43, .72), rgba(12, 20, 32, .92));
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 1.35rem 1.45rem;
+  }
+  .panel-head {
+    display: flex; align-items: baseline; gap: .85rem;
+    margin-bottom: 1.1rem;
+  }
+  .panel-head h2 {
+    font-size: .95rem; font-weight: 620; letter-spacing: .015em; margin: 0;
+  }
+  .panel-head .hint { color: var(--dim); font-size: .78rem; }
+  .panel-head .spacer { margin-left: auto; }
+
+  /* ---------- offenders ---------- */
+  .offenders { list-style: none; margin: 0; padding: 0; display: grid; gap: .68rem; }
+  .offenders li {
+    display: grid;
+    grid-template-columns: minmax(0, 12.5rem) 1fr 4.25rem;
+    align-items: center;
+    gap: .85rem;
+  }
+  .offenders .ip {
+    font-family: var(--mono); font-size: .86rem; color: var(--text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .offenders .count {
+    text-align: right; font-family: var(--mono);
+    font-size: .86rem; color: var(--muted);
+  }
+  .meter {
+    height: 8px; border-radius: 999px;
+    background: rgba(27, 42, 62, .8);
+    overflow: hidden;
+  }
+  .meter i {
+    display: block; height: 100%;
+    background: linear-gradient(90deg, var(--rose), var(--amber));
+    border-radius: 999px;
+  }
+  .offenders .empty { color: var(--dim); grid-template-columns: 1fr; font-size: .88rem; }
+
+  /* ---------- hourly chart ---------- */
+  .chart {
+    display: flex; align-items: flex-end; gap: 4px;
+    height: 150px; padding-top: .4rem;
+  }
+  .bar-col {
+    flex: 1 1 0;
+    min-height: 3px;
+    border-radius: 4px 4px 2px 2px;
+    background: linear-gradient(180deg, var(--sky), rgba(76, 194, 255, .16));
+    transition: filter .15s ease;
+  }
+  .bar-col:hover { filter: brightness(1.35); }
+  .chart-axis {
+    display: flex; justify-content: space-between;
+    margin-top: .55rem; color: var(--dim); font-size: .72rem;
+    font-family: var(--mono);
+  }
+
+  /* ---------- table ---------- */
+  .table-scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; min-width: 780px; }
+  thead th {
+    text-align: left;
+    font-size: .71rem; letter-spacing: .13em; text-transform: uppercase;
+    color: var(--dim); font-weight: 560;
+    padding: .55rem .9rem;
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+  }
+  tbody td {
+    padding: .68rem .9rem;
+    border-bottom: 1px solid var(--line-soft);
+    font-size: .875rem;
+    vertical-align: middle;
+  }
+  tbody tr { transition: background .12s ease; }
+  tbody tr:hover { background: rgba(76, 194, 255, .05); }
+  tbody tr:last-child td { border-bottom: 0; }
+  td .muted { color: var(--muted); }
+  td .dimmed { color: var(--dim); }
+  .badge {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: .71rem; letter-spacing: .06em;
+    padding: .18rem .55rem;
+    border-radius: 6px;
+    border: 1px solid transparent;
+  }
+  .ev-connect { color: var(--sky); background: rgba(76, 194, 255, .1); border-color: rgba(76, 194, 255, .28); }
+  .ev-password { color: var(--amber); background: rgba(246, 185, 59, .1); border-color: rgba(246, 185, 59, .28); }
+  .ev-pubkey { color: var(--rose); background: rgba(255, 107, 129, .1); border-color: rgba(255, 107, 129, .28); }
+  .empty-row td { color: var(--dim); text-align: center; padding: 2.25rem 1rem; }
+
+  /* ---------- blocklist feed ---------- */
+  .feed-head-actions { margin-left: auto; display: flex; gap: .55rem; }
+  .chip {
+    display: inline-flex; align-items: center; gap: .45rem;
+    font-size: .78rem; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 8px;
+    background: rgba(16, 27, 43, .55);
+    padding: .35rem .75rem;
+    cursor: pointer; text-decoration: none;
+    transition: border-color .15s ease, color .15s ease;
+  }
+  .chip:hover { border-color: rgba(76, 194, 255, .5); color: var(--text); }
+  .feed {
+    margin: 0; padding: 0; list-style: none;
+    max-height: 340px; overflow-y: auto;
+    border: 1px solid var(--line-soft);
+    border-radius: 10px;
+    background: rgba(7, 11, 18, .45);
+  }
+  .feed li {
+    display: flex; align-items: center; gap: 1rem;
+    padding: .52rem 1rem;
+    border-bottom: 1px solid var(--line-soft);
+    font-family: var(--mono); font-size: .845rem;
+  }
+  .feed li:last-child { border-bottom: 0; }
+  .feed li:hover { background: rgba(76, 194, 255, .05); }
+  .feed .ip { color: var(--text); min-width: 13rem; }
+  .feed .meta { color: var(--dim); font-size: .78rem; margin-left: auto; text-align: right; }
+  .feed .empty { color: var(--dim); font-family: var(--sans); justify-content: center; padding: 1.6rem; }
+
+  /* ---------- footer ---------- */
+  footer {
+    border-top: 1px solid var(--line-soft);
+    margin-top: 2.75rem;
+    padding: 1.75rem 0 2.5rem;
+    color: var(--dim); font-size: .82rem;
+  }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: .85rem 1.5rem; align-items: center; }
+  footer .links { margin-left: auto; display: flex; flex-wrap: wrap; gap: 1.15rem; }
+  footer a { color: var(--muted); text-decoration: none; font-family: var(--mono); font-size: .78rem; }
+  footer a:hover { color: var(--sky); }
+
+  @media (max-width: 1020px) {
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .grid-two { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 720px) {
+    .topnav { display: none; }
+    .clock { display: none; }
+    .hero { padding-top: 3rem; }
+    .stats { grid-template-columns: 1fr; }
+    .offenders li { grid-template-columns: minmax(0, 9.5rem) 1fr 3.25rem; }
+    .feed .ip { min-width: 10rem; }
+  }
+</style>
+</head>
+<body>
+<div class="bg-grid" aria-hidden="true"></div>
+
+<header class="topbar">
+  <div class="wrap">
+    <a class="brand" href="/">
+      <span class="brand-mark" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4cc2ff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 3l7 3v5c0 4.5-2.9 8.4-7 10-4.1-1.6-7-5.5-7-10V6l7-3z"></path>
+          <path d="M9 12l2 2 4-4"></path>
+        </svg>
+      </span>
+      <span class="brand-name">SSH <span>Sentinel</span></span>
+    </a>
+    <nav class="topnav">
+      <a href="#overview">Overview</a>
+      <a href="#activity">Activity</a>
+      <a href="#feed">Blocklist feed</a>
+    </nav>
+    <div class="top-right">
+      <span class="clock mono" id="utc-clock">--:--:-- UTC</span>
+      <span class="pill" id="pill"><span class="dot"></span><span id="pill-text">Live · port {{ honeypot_port }}</span></span>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="hero wrap">
+    <span class="eyebrow">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
+      Honeypot · connection watchtower
+    </span>
+    <h1>Every hand that reaches for <em>port 22</em> — on the record.</h1>
+    <p class="lede">
+      This server runs a decoy SSH service. It accepts every connection, captures the source IP,
+      client banner and credential guesses, then turns every probe away. Nothing is trusted,
+      nothing is granted — just observed and filed.
+    </p>
+    <div class="hero-actions">
+      <a class="btn btn-primary" href="/export.csv">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"></path><path d="M7 11l5 5 5-5"></path><path d="M5 21h14"></path></svg>
+        Export events (CSV)
+      </a>
+      <a class="btn btn-ghost" href="/blocklist.txt">Raw IP blocklist</a>
+      <a class="btn btn-ghost" href="/api/stats">JSON API</a>
+    </div>
+    <div class="hero-meta">
+      <span>Last contact <strong id="hero-last" class="mono">{{ stats.last_seen or 'never' }}</strong></span>
+      <span>Captured live into <code>SQLite</code></span>
+      <span>Feed it to <code>fail2ban</code>, <code>ufw</code> or any firewall</span>
+    </div>
+  </section>
+
+  <section class="wrap" id="overview">
+    <div class="stats">
+      <article class="stat">
+        <div class="stat-label">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 12h4l2 6 4-12 2 6h4"></path></svg>
+          Connections · 24h
+        </div>
+        <div class="stat-value" id="stat-conn24">{{ stats.connections_24h }}</div>
+        <div class="stat-sub" id="stat-conn-total">{{ stats.connections_total }} all-time</div>
+      </article>
+      <article class="stat">
+        <div class="stat-label">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"></circle><path d="M3 12h18"></path><path d="M12 3c2.5 2.7 3.8 5.7 3.8 9S14.5 18.3 12 21c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3z"></path></svg>
+          Unique IPs
+        </div>
+        <div class="stat-value accent" id="stat-ips">{{ stats.unique_ips }}</div>
+        <div class="stat-sub" id="stat-ips-24">{{ stats.unique_ips_24h }} seen in the last 24h</div>
+      </article>
+      <article class="stat">
+        <div class="stat-label">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="10" width="16" height="10" rx="2"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg>
+          Credential attempts · 24h
+        </div>
+        <div class="stat-value warn" id="stat-auth">{{ stats.auth_24h }}</div>
+        <div class="stat-sub" id="stat-auth-total">{{ stats.auth_total }} all-time</div>
+      </article>
+      <article class="stat">
+        <div class="stat-label">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
+          Last contact
+        </div>
+        <div class="stat-value" id="stat-last">{{ stats.last_seen or '—' }}</div>
+        <div class="stat-sub" id="stat-last-sub">{{ stats.last_seen or 'no attempts recorded yet' }}</div>
+      </article>
+    </div>
+
+    <div class="grid-two">
+      <article class="panel">
+        <div class="panel-head">
+          <h2>Top offenders</h2>
+          <span class="hint">by connections</span>
+        </div>
+        <ol class="offenders" id="offenders">
+          {% set max_conn = (stats.top_ips | map(attribute='connections') | max) if stats.top_ips else 0 %}
+          {% for row in stats.top_ips %}
+          <li>
+            <span class="ip">{{ row.ip }}</span>
+            <span class="meter"><i style="width: {{ (row.connections * 100 / max_conn) | round(1) if max_conn else 0 }}%"></i></span>
+            <span class="count">{{ row.connections }}</span>
+          </li>
+          {% else %}
+          <li class="empty">No offenders recorded yet.</li>
+          {% endfor %}
+        </ol>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head">
+          <h2>Probe volume</h2>
+          <span class="hint">connections per hour · last 24h</span>
+        </div>
+        <div class="chart" id="hourly">
+          {% set max_h = (stats.hourly | map(attribute='count') | max) if stats.hourly else 0 %}
+          {% for b in stats.hourly %}
+          <div class="bar-col" title="{{ b.label }} UTC — {{ b.count }} connections" style="height: {{ (b.count * 100 / max_h) | round(1) if (max_h and b.count) else 3 }}%"></div>
+          {% endfor %}
+        </div>
+        <div class="chart-axis">
+          <span>{{ stats.hourly[0].label if stats.hourly else '' }}</span>
+          <span>{{ stats.hourly[11].label if stats.hourly | length > 11 else '' }}</span>
+          <span>{{ stats.hourly[23].label if stats.hourly | length > 23 else '' }}</span>
+        </div>
+      </article>
+    </div>
+
+    <article class="panel" id="activity">
+      <div class="panel-head">
+        <h2>Recent activity</h2>
+        <span class="hint">newest first</span>
+        <span class="spacer"></span>
+        <a class="chip" href="/export.csv">Export CSV</a>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Time (UTC)</th>
+              <th>Source IP</th>
+              <th>Port</th>
+              <th>Event</th>
+              <th>Username</th>
+              <th>Credential</th>
+              <th>Client banner</th>
+            </tr>
+          </thead>
+          <tbody id="recent-body">
+            {% for e in stats.recent %}
+            <tr>
+              <td class="mono muted">{{ e.ts.replace('T', ' ').replace('Z', '') }}</td>
+              <td class="mono">{{ e.ip }}</td>
+              <td class="mono dimmed">{{ e.ip_port if e.ip_port is not none else '—' }}</td>
+              <td><span class="badge ev-{{ e.event }}">{{ e.event }}</span></td>
+              <td class="mono muted">{{ e.username or '—' }}</td>
+              <td class="mono muted">{{ e.detail or '—' }}</td>
+              <td class="mono dimmed">{{ e.client_version or '—' }}</td>
+            </tr>
+            {% else %}
+            <tr class="empty-row"><td colspan="7">No attempts recorded yet — the honeypot is listening.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+
+    <article class="panel" id="feed" style="margin-top: 1rem;">
+      <div class="panel-head">
+        <h2>Blocklist feed</h2>
+        <span class="hint">unique source IPs, most recent first</span>
+        <div class="feed-head-actions">
+          <button class="chip" id="copy-ips" type="button">Copy all IPs</button>
+          <a class="chip" href="/blocklist.txt">blocklist.txt</a>
+        </div>
+      </div>
+      <ul class="feed" id="feed-list">
+        {% for row in stats.ips %}
+        <li>
+          <span class="ip">{{ row.ip }}</span>
+          <span class="meta">{{ row.connections }} conn · {{ row.auth_attempts }} auth · last {{ row.last_seen.replace('T', ' ').replace('Z', '') }}</span>
+        </li>
+        {% else %}
+        <li class="empty">No source IPs recorded yet.</li>
+        {% endfor %}
+      </ul>
+    </article>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>SSH Sentinel · self-hosted honeypot · events stored in SQLite · rendered {{ stats.generated_at }}</span>
+    <nav class="links">
+      <a href="/api/stats">/api/stats</a>
+      <a href="/api/ips">/api/ips</a>
+      <a href="/blocklist.txt">/blocklist.txt</a>
+      <a href="/export.csv">/export.csv</a>
+      <a href="/healthz">/healthz</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+  const $ = (sel) => document.querySelector(sel);
+
+  function esc(value) {
+    return String(value ?? '').replace(/[&<>"]/g, (c) => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]
+    ));
+  }
+
+  function fmtTs(ts) {
+    return ts ? ts.replace('T', ' ').replace('Z', '') + ' UTC' : '—';
+  }
+
+  function fmtRel(ts) {
+    if (!ts) return 'never';
+    const diff = Math.max(0, Date.now() - Date.parse(ts));
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return mins + 'm ago';
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return hours + 'h ago';
+    return Math.floor(hours / 24) + 'd ago';
+  }
+
+  function renderStats(s) {
+    $('#stat-conn24').textContent = s.connections_24h.toLocaleString();
+    $('#stat-conn-total').textContent = s.connections_total.toLocaleString() + ' all-time';
+    $('#stat-ips').textContent = s.unique_ips.toLocaleString();
+    $('#stat-ips-24').textContent = s.unique_ips_24h.toLocaleString() + ' seen in the last 24h';
+    $('#stat-auth').textContent = s.auth_24h.toLocaleString();
+    $('#stat-auth-total').textContent = s.auth_total.toLocaleString() + ' all-time';
+    $('#stat-last').textContent = fmtRel(s.last_seen);
+    $('#stat-last-sub').textContent = s.last_seen ? fmtTs(s.last_seen) : 'no attempts recorded yet';
+    $('#hero-last').textContent = fmtRel(s.last_seen);
+  }
+
+  function renderTop(rows) {
+    const max = rows.length ? Math.max(...rows.map((r) => r.connections)) : 1;
+    $('#offenders').innerHTML = rows.length ? rows.map((r) => `
+      <li>
+        <span class="ip">${esc(r.ip)}</span>
+        <span class="meter"><i style="width:${max ? Math.max(3, (r.connections * 100) / max) : 0}%"></i></span>
+        <span class="count">${r.connections.toLocaleString()}</span>
+      </li>`).join('') : '<li class="empty">No offenders recorded yet.</li>';
+  }
+
+  function renderHourly(hours) {
+    const max = Math.max(1, ...hours.map((h) => h.count));
+    $('#hourly').innerHTML = hours.map((h) => `
+      <div class="bar-col" title="${esc(h.label)} UTC — ${h.count} connections"
+           style="height:${h.count ? Math.max(3, (h.count * 100) / max) : 3}%"></div>`).join('');
+  }
+
+  function renderRecent(rows) {
+    $('#recent-body').innerHTML = rows.length ? rows.map((e) => `
+      <tr>
+        <td class="mono muted">${esc(fmtTs(e.ts))}</td>
+        <td class="mono">${esc(e.ip)}</td>
+        <td class="mono dimmed">${e.ip_port ?? '—'}</td>
+        <td><span class="badge ev-${esc(e.event)}">${esc(e.event)}</span></td>
+        <td class="mono muted">${esc(e.username) || '—'}</td>
+        <td class="mono muted">${esc(e.detail) || '—'}</td>
+        <td class="mono dimmed">${esc(e.client_version) || '—'}</td>
+      </tr>`).join('') : '<tr class="empty-row"><td colspan="7">No attempts recorded yet — the honeypot is listening.</td></tr>';
+  }
+
+  function renderFeed(rows) {
+    $('#feed-list').innerHTML = rows.length ? rows.map((r) => `
+      <li>
+        <span class="ip">${esc(r.ip)}</span>
+        <span class="meta">${r.connections} conn · ${r.auth_attempts} auth · last ${esc(fmtTs(r.last_seen))}</span>
+      </li>`).join('') : '<li class="empty">No source IPs recorded yet.</li>';
+  }
+
+  async function refresh() {
+    try {
+      const res = await fetch('/api/stats', { cache: 'no-store' });
+      if (!res.ok) throw new Error('stats fetch failed');
+      const s = await res.json();
+      renderStats(s);
+      renderTop(s.top_ips);
+      renderHourly(s.hourly);
+      renderRecent(s.recent);
+      renderFeed(s.ips);
+      const pill = $('#pill');
+      pill.classList.remove('stale');
+      $('#pill-text').textContent = 'Live · port {{ honeypot_port }}';
+    } catch (err) {
+      const pill = $('#pill');
+      pill.classList.add('stale');
+      $('#pill-text').textContent = 'Feed stale';
+    }
+  }
+
+  function tickClock() {
+    $('#utc-clock').textContent = new Date().toISOString().slice(11, 19) + ' UTC';
+  }
+
+  $('#copy-ips').addEventListener('click', async () => {
+    try {
+      const text = await (await fetch('/blocklist.txt')).text();
+      await navigator.clipboard.writeText(text.trim());
+      $('#copy-ips').textContent = 'Copied ✓';
+      setTimeout(() => { $('#copy-ips').textContent = 'Copy all IPs'; }, 1600);
+    } catch (err) {
+      $('#copy-ips').textContent = 'Copy failed';
+    }
+  });
+
+  tickClock();
+  setInterval(tickClock, 1000);
+  refresh();
+  setInterval(refresh, 30000);
+</script>
+</body>
+</html>

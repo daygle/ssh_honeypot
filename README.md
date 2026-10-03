@@ -1,138 +1,158 @@
-# SSH Blocklist (Journalctl-Based)
+# SSH Sentinel
 
-A lightweight PHP-based system for tracking failed SSH login attempts on a Linux server.
-It reads authentication failures directly from systemd-journal, extracts the source IP
-addresses, and stores them in a MySQL/MariaDB database. A simple web interface displays
-the most recent failed login IPs.
+A self-hosted SSH honeypot that records every connection attempt to your server and
+publishes the results as a live HTML dashboard.
 
-This is ideal for:
-
-- Security dashboards
-- Monitoring brute-force attempts
-- Feeding IPs into firewalls or automation
-- Lightweight intrusion visibility on minimal Ubuntu installs
-
----
-
-## Features
-
-- Reads SSH login failures directly from journalctl
-- Supports IPv4 and IPv6
-- Deduplicates IPs before storing
-- Simple PHP cronjob for periodic updates
-- Minimal web interface to display failed login IPs
-- Works on systems without /var/log/auth.log (e.g., minimized Ubuntu)
+This is a **total refactor** of the old journalctl/PHP/MariaDB stack. The old flow
+scanned `journalctl` on a cron schedule and truncated a MySQL table every run; this
+version *is* the attacker's destination: a decoy SSH service on port 22 captures the
+source IP, client banner and credential guesses the moment they arrive, stores them
+in SQLite, and the dashboard renders them live. No cron, no MySQL, no PHP, no data
+loss between runs, and nothing to migrate.
 
 ---
 
 ## How it works
 
-### 1. Cronjob script (cronjobs/failed_ssh_login.php)
+```
+ internet scanners ──▶ port 22 ──▶ decoy SSH (asyncssh) ──▶ events ──▶ SQLite (volume)
+                                                                  ▲
+ browser ──▶ port 8080 ──▶ FastAPI dashboard / API ───────────────┘
+```
 
-- Runs 'journalctl -u ssh.service --no-pager --since "1 hour ago"'
-- Scans for "Failed password for" and "Failed keyboard-interactive"
-- Extracts IPv4/IPv6 addresses
-- Deduplicates IPs
-- Truncates the failed_ips table
-- Inserts the current unique IPs
+Both services run in **one container** from **one `docker compose up`**:
 
-### 2. Web page (public/index.php)
+- **Honeypot** — an `asyncssh` server that looks like OpenSSH, advertises a plausible
+  banner, accepts every connection, records every credential guess, and then refuses
+  authentication *always*. It never opens a shell and never grants access.
+- **Dashboard** — a FastAPI + Jinja2 page with probe volume, unique IPs, top offenders,
+  recent activity, and a blocklist feed you can pipe into a firewall.
 
-- Connects to the database
-- Fetches entries from failed_ips
-- Displays one IP per line, newest first
-
----
-
-## Installation
-
-### 1. Install required packages
-
-On Ubuntu/Debian:
-
-    sudo apt update
-    sudo apt install apache2 php php-mysql libapache2-mod-php mariadb-server git
+Every TCP connection is recorded at connect time, so even non-SSH garbage probes
+(port scanners, vulnerability sweeps) show up with their source IP.
 
 ---
 
-### 2. Clone the repository
+## ⚠️ Port 22 cutover — read before starting
 
-    cd /var/www/
-    git clone https://gitlab.com/daygle/ssh_blocklist.git
+The honeypot takes **host port 22**. If your real SSH daemon is still on 22 when you
+start this, either the honeypot won't bind or — worse — you move your own access out
+of the way without a replacement. Do it in this order, **keeping your current SSH
+session open the whole time**:
 
----
+1. Move the real SSH daemon to another port:
 
-### 3. Create the database
+   ```bash
+   sudo nano /etc/ssh/sshd_config      # set: Port 2222
+   sudo systemctl restart ssh
+   sudo ufw allow 2222/tcp             # if you use a firewall
+   ```
 
-Log into MariaDB/MySQL:
+2. **Verify** you can log in on the new port from a *second* terminal before
+   closing anything:
 
-    sudo mysql
+   ```bash
+   ssh -p 2222 youruser@your-server
+   ```
 
-Create the database:
+3. Only then start the honeypot (below). It binds 22; your real SSH stays on 2222.
 
-    CREATE DATABASE ssh_blocklist;
-    EXIT;
-
-Import the schema from the repository:
-
-    mysql -u root ssh_blocklist < sql/initial_schema.sql
-
-This will create the `failed_ips` table with the following structure:
-
-- `id` (auto‑increment primary key)  
-- `ip_address` (VARCHAR(45), UNIQUE)  
-- `timestamp` (DATETIME, defaults to CURRENT_TIMESTAMP)
-
----
-
-### 4. Configure database connection
-
-Edit `include/db.php` and set your database credentials:
-
-    <?php
-    $servername = "localhost";
-    $username = "ssh_blocklist";
-    $password = "yourpassword";
-    $dbname = "ssh_blocklist";
-
-    $conn = new mysqli($servername, $username, $password, $dbname);
-
-    if ($conn->connect_error) {
-        die("DB connection failed: " . $conn->connect_error);
-    }
-    ?>
-
-Make sure the database name matches the one you created (`ssh_blocklist`).
+Prefer to leave sshd on 22? Change the mapping in `docker-compose.yml`
+(`"2222:22"`) and point scanners at the decoy port instead.
 
 ---
 
-### 5. Test the cronjob script
+## Quick start
 
-Run the following script:
+```bash
+git clone <this repo> && cd ssh_blocklist
+docker compose up -d --build
+```
 
-    /usr/bin/php /var/www/ssh_blocklist/cronjobs/failed_ssh_login.php
+Dashboard: `http://your-server:8080`
 
-Expected output:
+State (SQLite DB + generated SSH host key) lives in the `sentinel-data` Docker
+volume, so rebuilds and upgrades never lose history.
 
-    Table successfully cleared.
-    Current IPs successfully synced from journal.
+Stop / remove:
 
-If you see "Failed to read journalctl output.", ensure:
-
-- journalctl exists (usually at /usr/bin/journalctl)
-- You’re on a systemd-based system
-- You have permission to read the journal (root is safest)
+```bash
+docker compose down          # keeps the data volume
+docker compose down -v       # also wipes recorded history
+```
 
 ---
 
-### 6. Set up the cronjob
+## Configuration
 
-Edit the root’s crontab:
+Environment variables (set under `environment:` in `docker-compose.yml`):
 
-    sudo crontab -e
+| Variable | Default | Purpose |
+|---|---|---|
+| `HONEYPOT_PORT` | `22` | Port the decoy SSH service listens on |
+| `HONEYPOT_BANNER` | `SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.6` | Banner shown to scanners |
+| `HONEYPOT_ENABLED` | `1` | Set `0` to run the dashboard alone |
+| `WEB_PORT` | `8080` | Dashboard port |
+| `DATA_DIR` | `/data` | Where SQLite + host key are stored |
 
-Add:
+---
 
-    */5 * * * * /usr/bin/php /var/www/ssh_blocklist/cronjobs/failed_ssh_login.php > /dev/null 2>&1
+## Dashboard & API
 
-Runs script every 5 minutes.
+| URL | What it shows |
+|---|---|
+| `/` | Live HTML dashboard (auto-refreshes every 30s) |
+| `/api/stats` | JSON summary: counters, top IPs, hourly volume, recent events |
+| `/api/ips` | JSON per-IP aggregates (connections, auth attempts, first/last seen) |
+| `/blocklist.txt` | Unique source IPs, one per line — same shape as the old page |
+| `/export.csv` | Full event history as CSV |
+| `/healthz` | Health probe |
+
+### Feeding your firewall
+
+```bash
+# ufw: block every IP the honeypot has seen
+for ip in $(curl -s http://localhost:8080/blocklist.txt); do sudo ufw deny from "$ip"; done
+```
+
+The text endpoint is deliberately plain, so it also drops straight into fail2ban
+filters, cron pulls, or any automation that used the old page.
+
+---
+
+## Development (without Docker)
+
+```bash
+python3 -m venv .venv && . .venv/bin/activate
+pip install -r requirements-dev.txt
+pytest                      # DB, honeypot and dashboard tests
+HONEYPOT_PORT=2222 python -m app
+```
+
+The app runs without binding privileges in dev: set `HONEYPOT_PORT` to a high port
+(or `HONEYPOT_ENABLED=0` for the dashboard only).
+
+---
+
+## Security notes
+
+- The honeypot **never authenticates** anyone: every password and public key is
+  recorded and rejected, and no shell is ever spawned.
+- The container runs as an unprivileged user with a read-only filesystem, dropped
+  capabilities and `no-new-privileges`.
+- The dashboard is intentionally unauthenticated because it contains only honeypot
+  data — but if you expose it publicly, put it behind a reverse proxy with TLS
+  and access control (e.g. Caddy/nginx + basic auth).
+- Recorded passwords are attacker guesses stored as evidence. Treat the export as
+  sensitive-ish data and don't reuse it anywhere.
+
+---
+
+## What replaced what
+
+| Old | New |
+|---|---|
+| `journalctl` cron parser | Decoy SSH service capturing probes directly |
+| MySQL (`failed_ips`) + `TRUNCATE` cron | SQLite written in real time |
+| `public/index.php` IP list | Live dashboard + `/blocklist.txt` + JSON API + CSV export |
+| Bare-metal LAMP install | One hardened Docker container |
