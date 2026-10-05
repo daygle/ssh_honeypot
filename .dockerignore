@@ -1,4 +1,5 @@
 .git
+.freebuff
 .venv
 venv
 __pycache__
