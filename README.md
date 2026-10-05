@@ -54,6 +54,45 @@ docker compose down          # keeps the data volume
 docker compose down -v       # also wipes recorded history
 ```
 
+## Updating
+
+Pull the new code and rebuild the image:
+
+```bash
+cd ssh_honeypot
+git pull
+docker compose build         # required: a restart alone keeps the old image
+docker compose up -d
+```
+
+The rebuild is the part people skip. `docker compose restart` reuses the image
+that is already built, so it keeps running the old code - and after a
+`requirements.txt` bump it keeps running the old dependencies too. Only
+`docker compose build` picks up a new Dockerfile, changed app code or new pins.
+
+Recorded events live in the `daygle-data` volume and survive the recreate.
+Nothing in the project runs schema migrations; `init_db` only issues
+`CREATE TABLE IF NOT EXISTS`, so an update never needs a migration step.
+
+Confirm the new version actually came up:
+
+```bash
+curl -s localhost:8080/healthz
+docker compose logs | grep "honeypot listening on"
+```
+
+`/healthz` is not enough on its own - it reports ok whenever the web process
+answers, and a honeypot that failed to bind its port still answers. The
+`honeypot listening on` line is what proves the decoy is listening.
+
+To roll back, check out the previous commit and rebuild:
+
+```bash
+git log --oneline -3         # find the sha you want
+git checkout <sha>
+docker compose build && docker compose up -d
+```
+
 ## What to run before starting
 
 1. Move real sshd to 2222 and verify a login on the new port from a second terminal.
