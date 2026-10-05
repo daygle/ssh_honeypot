@@ -1,6 +1,6 @@
 ## Quick start (Debian 13)
 
-Install Docker first. Docker's official one-liner:
+Install Docker first. Docker's official apt repository:
 
 ```bash
 sudo apt-get update
@@ -14,16 +14,10 @@ sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plug
 sudo usermod -aG docker $USER && newgrp docker
 ```
 
-Docker's official get.docker.com script (same result, fewer steps):
+Or Docker's convenience script (same result, fewer steps):
 
 ```bash
-sudo apt-get update && sudo apt-get install -y ca-certificates curl
-sudo install -m 0755 -d /etc/apt/keyrings
-sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
-sudo chmod a+r /etc/apt/keyrings/docker.asc
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian trixie stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-sudo apt-get update
-sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+curl -fsSL https://get.docker.com | sudo sh
 sudo usermod -aG docker $USER && newgrp docker
 ```
 
@@ -31,8 +25,6 @@ Then clone and run:
 
 ```bash
 git clone <this repo> ssh_honeypot && cd ssh_honeypot
-docker compose up -d --build
-docker compose logs -f
 ```
 
 The honeypot takes host port **22**. Before starting it, move your real SSH daemon off 22 (keep your current SSH session open the whole time):
@@ -47,8 +39,8 @@ ssh -p 2222 youruser@your-server    # verify from a second terminal
 Only then start the honeypot:
 
 ```bash
-cd /opt/ssh_honeypot
-docker compose up -d
+docker compose up -d --build   # from the ssh_honeypot checkout
+docker compose logs -f
 ```
 
 Run it as a normal user, not root: with Docker group membership on the Debian 13 host, the container binds port 22 itself, and running as root offers no advantage and exposes you to a real lockout if you turn on port 22 without moving sshd.
@@ -85,8 +77,14 @@ Environment variables (set under `environment:` in `docker-compose.yml`):
 
 | Variable | Default | Purpose |
 |---|---|---|
+| `HONEYPOT_HOST` | `0.0.0.0` | Address the decoy SSH service binds to |
 | `HONEYPOT_PORT` | `22` | Port the decoy SSH service listens on |
-| `HONEYPOT_BANNER` | `SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu0.6` | Banner shown to scanners |
+| `HONEYPOT_BANNER` | `SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.6` | Banner shown to scanners |
 | `HONEYPOT_ENABLED` | `1` | Set `0` to run the dashboard alone |
+| `WEB_HOST` | `0.0.0.0` | Address the dashboard binds to |
 | `WEB_PORT` | `8080` | Dashboard port |
-| `DATA_DIR` | `/data` | Where SQLite + host key are stored |
+| `DATA_DIR` | `/data` in Docker, `./data` otherwise | Where SQLite + host key are stored |
+| `DB_PATH` | `$DATA_DIR/honeypot.db` | SQLite database file |
+| `HOST_KEY_PATH` | `$DATA_DIR/host_key` | Decoy SSH host key (generated on first start) |
+
+Captured usernames and banners are capped at 512 characters, and CSV exports prefix cells that would be evaluated as spreadsheet formulas with `'`.

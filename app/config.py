@@ -17,7 +17,10 @@ def _int(name: str, default: int) -> int:
     raw = os.environ.get(name)
     if raw is None or raw.strip() == "":
         return default
-    return int(raw)
+    try:
+        return int(raw)
+    except ValueError:
+        raise ValueError(f"{name} must be an integer, got {raw!r}") from None
 
 
 # Storage -------------------------------------------------------------------
@@ -38,5 +41,5 @@ HONEYPOT_BANNER = os.environ.get("HONEYPOT_BANNER", "SSH-2.0-OpenSSH_8.9p1 Ubunt
 # Dashboard -----------------------------------------------------------------
 
 WEB_HOST = os.environ.get("WEB_HOST", "0.0.0.0")
-# Freebuff previews inject PORT; standalone runs use WEB_PORT.
+# Some hosting platforms inject PORT; standalone runs use WEB_PORT.
 WEB_PORT = _int("WEB_PORT", _int("PORT", 8080))

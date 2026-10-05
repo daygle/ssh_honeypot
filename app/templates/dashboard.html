@@ -556,12 +556,12 @@
   </div>
 </footer>
 
-<script>
+<script nonce="{{ csp_nonce }}">
   const $ = (sel) => document.querySelector(sel);
 
   function esc(value) {
-    return String(value ?? '').replace(/[&<>"]/g, (c) => (
-      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]
+    return String(value ?? '').replace(/[&<>"']/g, (c) => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
     ));
   }
 
@@ -640,12 +640,10 @@
       renderHourly(s.hourly);
       renderRecent(s.recent);
       renderFeed(s.ips);
-      const pill = $('#pill');
-      pill.classList.remove('stale');
-      $('#pill-text').textContent = 'Live · Port {{ honeypot_port }}';
+      $('#pill').classList.remove('stale');
+      $('#pill-text').textContent = 'Live · Port ' + {{ honeypot_port | tojson }};
     } catch (err) {
-      const pill = $('#pill');
-      pill.classList.add('stale');
+      $('#pill').classList.add('stale');
       $('#pill-text').textContent = 'Feed Stale';
     }
   }
@@ -656,7 +654,9 @@
 
   $('#copy-ips').addEventListener('click', async () => {
     try {
-      const text = await (await fetch('/ssh-blocklist.txt')).text();
+      const res = await fetch('/ssh-blocklist.txt', { cache: 'no-store' });
+      if (!res.ok) throw new Error('blocklist fetch failed');
+      const text = await res.text();
       await navigator.clipboard.writeText(text.trim());
       $('#copy-ips').textContent = 'Copied ✓';
       setTimeout(() => { $('#copy-ips').textContent = 'Copy All IPs'; }, 1600);
