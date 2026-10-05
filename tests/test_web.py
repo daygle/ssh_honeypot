@@ -93,3 +93,28 @@ def test_healthz(client):
 
     assert res.status_code == 200
     assert res.json() == {"status": "ok"}
+
+
+def test_security_headers_and_csp_nonce(client):
+    res = client.get("/")
+
+    assert res.headers["x-content-type-options"] == "nosniff"
+    assert res.headers["x-frame-options"] == "DENY"
+    csp = res.headers["content-security-policy"]
+    nonce = csp.split("'nonce-", 1)[1].split("'", 1)[0]
+    assert f'<script nonce="{nonce}">' in res.text
+    assert client.get("/healthz").headers["x-content-type-options"] == "nosniff"
+
+
+def test_dashboard_escapes_attacker_strings(client):
+    db.record_event("password", "203.0.113.9", username="<script>alert(1)</script>", detail="x")
+
+    res = client.get("/")
+
+    assert "<script>alert(1)</script>" not in res.text
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in res.text
+
+
+def test_api_docs_disabled(client):
+    assert client.get("/docs").status_code == 404
+    assert client.get("/openapi.json").status_code == 404

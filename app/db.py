@@ -10,8 +10,9 @@ from __future__ import annotations
 import csv
 import io
 import sqlite3
+import threading
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
 
 from . import config
 
@@ -26,18 +27,58 @@ CREATE TABLE IF NOT EXISTS events (
     detail TEXT,
     client_version TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_events_ip ON events (ip);
-CREATE INDEX IF NOT EXISTS idx_events_ts ON events (ts);
+-- Superseded by the covering indexes below.
+DROP INDEX IF EXISTS idx_events_ip;
+DROP INDEX IF EXISTS idx_events_ts;
+-- Covers the per-IP aggregates without touching the table.
+CREATE INDEX IF NOT EXISTS idx_events_ip_event_ts ON events (ip, event, ts);
+-- Covers the hourly connection histogram.
+CREATE INDEX IF NOT EXISTS idx_events_event_ts ON events (event, ts);
 """
 
-AUTH_EVENTS = ("password", "pubkey")
+TS_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+
+# Attacker-controlled strings are capped so a single client cannot bloat the
+# database (or the dashboard) with megabyte-sized usernames or banners.
+MAX_FIELD_LEN = 512
+
+CSV_HEADER = ("timestamp_utc", "ip", "ip_port", "event", "username", "detail", "client_version")
+
+# Spreadsheet apps evaluate cells starting with these as formulas.
+_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+_IP_AGGREGATE_SQL = """
+    SELECT ip,
+           SUM(event = 'connect') AS connections,
+           SUM(event IN ('password', 'pubkey')) AS auth_attempts,
+           MIN(ts) AS first_seen,
+           MAX(ts) AS last_seen
+    FROM events
+    GROUP BY ip
+    ORDER BY last_seen DESC
+"""
+
+_local = threading.local()
+
+
+def _open() -> sqlite3.Connection:
+    config.DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(config.DB_PATH, timeout=15, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    return conn
 
 
 def _connect() -> sqlite3.Connection:
-    config.DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(config.DB_PATH, timeout=15)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
+    """Return this thread's cached connection, opening it on first use.
+
+    Use as ``with _connect() as conn:`` - the block commits on success and
+    rolls back on error; the connection itself stays open for reuse.
+    """
+    conn = getattr(_local, "conn", None)
+    if conn is None:
+        conn = _local.conn = _open()
     return conn
 
 
@@ -46,12 +87,18 @@ def init_db() -> None:
         conn.executescript(SCHEMA)
 
 
+def _fmt(dt: datetime) -> str:
+    return dt.strftime(TS_FORMAT)
+
+
 def now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return _fmt(datetime.now(timezone.utc))
 
 
-def cutoff_iso(hours: int) -> str:
-    return (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+def _clip(value: Optional[str]) -> Optional[str]:
+    if value is None or len(value) <= MAX_FIELD_LEN:
+        return value
+    return value[:MAX_FIELD_LEN]
 
 
 def record_event(
@@ -67,7 +114,7 @@ def record_event(
         cur = conn.execute(
             "INSERT INTO events (ts, ip, ip_port, event, username, detail, client_version)"
             " VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (now_iso(), ip, ip_port, event, username, detail, client_version),
+            (now_iso(), ip, ip_port, event, _clip(username), _clip(detail), _clip(client_version)),
         )
         return int(cur.lastrowid)
 
@@ -79,120 +126,122 @@ def set_client_version(event_id: int, client_version: Optional[str]) -> None:
     with _connect() as conn:
         conn.execute(
             "UPDATE events SET client_version = ? WHERE id = ? AND client_version IS NULL",
-            (client_version, event_id),
+            (_clip(client_version), event_id),
         )
+
+
+def _ip_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    return [dict(r) for r in conn.execute(_IP_AGGREGATE_SQL)]
 
 
 def get_ip_rows() -> list[dict[str, Any]]:
     """Per-IP aggregates, most recently seen first."""
-    with _connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT ip,
-                   SUM(CASE WHEN event = 'connect' THEN 1 ELSE 0 END) AS connections,
-                   SUM(CASE WHEN event IN ('password', 'pubkey') THEN 1 ELSE 0 END) AS auth_attempts,
-                   MIN(ts) AS first_seen,
-                   MAX(ts) AS last_seen
-            FROM events
-            GROUP BY ip
-            ORDER BY last_seen DESC
-            """
-        ).fetchall()
-    return [dict(r) for r in rows]
+    return _ip_rows(_connect())
 
 
-def get_hourly_connections(hours: int = 24) -> list[dict[str, Any]]:
-    """Connection counts bucketed by hour, gaps filled with zero."""
+def _hourly(conn: sqlite3.Connection, hours: int) -> list[dict[str, Any]]:
     now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
     start = now - timedelta(hours=hours - 1)
-    with _connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT substr(ts, 1, 13) AS bucket, COUNT(*) AS count
-            FROM events
-            WHERE event = 'connect' AND ts >= ?
-            GROUP BY bucket
-            """,
-            (start.strftime("%Y-%m-%dT%H:%M:%SZ"),),
-        ).fetchall()
+    rows = conn.execute(
+        """
+        SELECT substr(ts, 1, 13) AS bucket, COUNT(*) AS count
+        FROM events
+        WHERE event = 'connect' AND ts >= ?
+        GROUP BY bucket
+        """,
+        (_fmt(start),),
+    ).fetchall()
     counts = {r["bucket"]: r["count"] for r in rows}
     out: list[dict[str, Any]] = []
     for i in range(hours):
         t = start + timedelta(hours=i)
-        out.append(
-            {
-                "label": t.strftime("%H:00"),
-                "count": counts.get(t.strftime("%Y-%m-%dT%H"), 0),
-            }
-        )
+        out.append({"label": t.strftime("%H:00"), "count": counts.get(t.strftime("%Y-%m-%dT%H"), 0)})
     return out
+
+
+def get_hourly_connections(hours: int = 24) -> list[dict[str, Any]]:
+    """Connection counts bucketed by hour, gaps filled with zero."""
+    return _hourly(_connect(), hours)
 
 
 def get_summary(recent_limit: int = 25, top_limit: int = 8) -> dict[str, Any]:
     """Everything the dashboard needs, in one call."""
-    cutoff = cutoff_iso(24)
-    with _connect() as conn:
-        totals = conn.execute(
-            """
-            SELECT
-                SUM(CASE WHEN event = 'connect' THEN 1 ELSE 0 END) AS connections_total,
-                SUM(CASE WHEN event = 'connect' AND ts >= ? THEN 1 ELSE 0 END) AS connections_24h,
-                SUM(CASE WHEN event IN ('password', 'pubkey') THEN 1 ELSE 0 END) AS auth_total,
-                SUM(CASE WHEN event IN ('password', 'pubkey') AND ts >= ? THEN 1 ELSE 0 END) AS auth_24h,
-                COUNT(DISTINCT ip) AS unique_ips,
-                COUNT(DISTINCT CASE WHEN ts >= ? THEN ip END) AS unique_ips_24h,
-                MAX(ts) AS last_seen
-            FROM events
-            """,
-            (cutoff, cutoff, cutoff),
-        ).fetchone()
-        last_event = conn.execute("SELECT * FROM events ORDER BY id DESC LIMIT 1").fetchone()
-        top_ips = conn.execute(
-            """
-            SELECT ip,
-                   SUM(CASE WHEN event = 'connect' THEN 1 ELSE 0 END) AS connections,
-                   SUM(CASE WHEN event IN ('password', 'pubkey') THEN 1 ELSE 0 END) AS auth_attempts,
-                   MIN(ts) AS first_seen,
-                   MAX(ts) AS last_seen
-            FROM events
-            GROUP BY ip
-            ORDER BY connections DESC, last_seen DESC
-            LIMIT ?
-            """,
-            (top_limit,),
-        ).fetchall()
-        recent = conn.execute(
-            "SELECT * FROM events ORDER BY id DESC LIMIT ?", (recent_limit,)
-        ).fetchall()
+    cutoff = _fmt(datetime.now(timezone.utc) - timedelta(hours=24))
+    conn = _connect()
+    totals = conn.execute(
+        """
+        SELECT
+            SUM(event = 'connect') AS connections_total,
+            SUM(event = 'connect' AND ts >= :cutoff) AS connections_24h,
+            SUM(event IN ('password', 'pubkey')) AS auth_total,
+            SUM(event IN ('password', 'pubkey') AND ts >= :cutoff) AS auth_24h,
+            COUNT(DISTINCT ip) AS unique_ips,
+            COUNT(DISTINCT CASE WHEN ts >= :cutoff THEN ip END) AS unique_ips_24h,
+            MAX(ts) AS last_seen
+        FROM events
+        """,
+        {"cutoff": cutoff},
+    ).fetchone()
+    recent = [dict(r) for r in conn.execute("SELECT * FROM events ORDER BY id DESC LIMIT ?", (recent_limit,))]
+    ips = _ip_rows(conn)
+    hourly = _hourly(conn, 24)
 
-    zero = {"connections_total": 0, "connections_24h": 0, "auth_total": 0,
-            "auth_24h": 0, "unique_ips": 0, "unique_ips_24h": 0, "last_seen": None}
-    counts = {k: (totals[k] if totals[k] is not None else v) for k, v in zero.items()}
+    # Derived from the per-IP rows rather than a second GROUP BY pass.
+    top_ips = sorted(ips, key=lambda r: (r["connections"], r["last_seen"]), reverse=True)[:top_limit]
+    counts = {k: totals[k] or 0 for k in
+              ("connections_total", "connections_24h", "auth_total", "auth_24h", "unique_ips", "unique_ips_24h")}
     return {
         "generated_at": now_iso(),
         **counts,
-        "last_event": dict(last_event) if last_event else None,
-        "top_ips": [dict(r) for r in top_ips],
-        "recent": [dict(r) for r in recent],
-        "hourly": get_hourly_connections(),
-        "ips": get_ip_rows(),
+        "last_seen": totals["last_seen"],
+        "last_event": recent[0] if recent else None,
+        "top_ips": top_ips,
+        "recent": recent,
+        "hourly": hourly,
+        "ips": ips,
     }
 
 
 def blocklist_text() -> str:
-    """Unique source IPs, one per line (same shape as the old page)."""
-    ips = [row["ip"] for row in get_ip_rows()]
-    return "\n".join(ips) + ("\n" if ips else "")
+    """Unique source IPs, one per line, most recently seen first."""
+    rows = _connect().execute("SELECT ip FROM events GROUP BY ip ORDER BY MAX(ts) DESC").fetchall()
+    return "".join(f"{r['ip']}\n" for r in rows)
+
+
+def _csv_safe(value: Any) -> Any:
+    """Neutralise spreadsheet formula injection in attacker-supplied text."""
+    if isinstance(value, str) and value.startswith(_CSV_FORMULA_PREFIXES):
+        return "'" + value
+    return value
+
+
+def iter_events_csv(batch_size: int = 1000) -> Iterator[str]:
+    """Yield the full event log as CSV, one chunk per batch of rows.
+
+    Uses a dedicated connection because a streaming response may resume the
+    generator on a different worker thread each time.
+    """
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(CSV_HEADER)
+    conn = _open()
+    try:
+        cur = conn.execute(
+            "SELECT ts, ip, ip_port, event, username, detail, client_version FROM events ORDER BY id ASC"
+        )
+        while True:
+            rows = cur.fetchmany(batch_size)
+            if not rows:
+                break
+            writer.writerows([_csv_safe(v) for v in row] for row in rows)
+            yield buf.getvalue()
+            buf.seek(0)
+            buf.truncate()
+    finally:
+        conn.close()
+    if buf.tell():
+        yield buf.getvalue()
 
 
 def events_csv() -> str:
-    buf = io.StringIO()
-    writer = csv.writer(buf)
-    writer.writerow(["timestamp_utc", "ip", "ip_port", "event", "username", "detail", "client_version"])
-    with _connect() as conn:
-        rows = conn.execute(
-            "SELECT ts, ip, ip_port, event, username, detail, client_version FROM events ORDER BY id ASC"
-        ).fetchall()
-    for r in rows:
-        writer.writerow([r["ts"], r["ip"], r["ip_port"], r["event"], r["username"], r["detail"], r["client_version"]])
-    return buf.getvalue()
+    return "".join(iter_events_csv())

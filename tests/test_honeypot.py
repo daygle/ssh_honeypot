@@ -48,3 +48,28 @@ async def _scenario():
 
     connects = [e for e in summary["recent"] if e["event"] == "connect"]
     assert connects, "TCP connections were not recorded"
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("::ffff:203.0.113.9", "203.0.113.9"),
+        ("203.0.113.9", "203.0.113.9"),
+        ("2001:db8::1", "2001:db8::1"),
+        ("fe80::1%eth0", "fe80::1"),
+        ("not-an-ip", "not-an-ip"),
+    ],
+)
+def test_normalize_ip(raw, expected):
+    assert honeypot._normalize_ip(raw) == expected
+
+
+def test_host_key_created_private(tmp_path, monkeypatch):
+    path = tmp_path / "keys" / "host_key"
+    monkeypatch.setattr(honeypot.config, "HOST_KEY_PATH", path)
+
+    key = honeypot._load_or_create_host_key()
+
+    assert path.stat().st_mode & 0o777 == 0o600
+    reloaded = honeypot._load_or_create_host_key()
+    assert reloaded.get_fingerprint() == key.get_fingerprint()

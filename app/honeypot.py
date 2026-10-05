@@ -9,7 +9,9 @@ exchange completes.
 
 from __future__ import annotations
 
+import ipaddress
 import logging
+import os
 from typing import Any, Optional
 
 import asyncssh
@@ -19,10 +21,25 @@ from . import config, db
 log = logging.getLogger("daygle.honeypot")
 
 
+def _normalize_ip(raw: str) -> str:
+    """Collapse IPv4-mapped IPv6 (``::ffff:1.2.3.4``) to plain IPv4.
+
+    Dual-stack listeners report IPv4 clients in mapped form; without this the
+    same attacker would appear under two addresses and the blocklist would
+    contain entries firewalls such as ufw/iptables reject.
+    """
+    try:
+        addr = ipaddress.ip_address(raw.split("%", 1)[0])
+    except ValueError:
+        return raw
+    mapped = getattr(addr, "ipv4_mapped", None)
+    return str(mapped or addr)
+
+
 def _peer(conn: Any) -> tuple[str, Optional[int]]:
     peer = conn.get_extra_info("peername")
     if isinstance(peer, tuple) and len(peer) >= 2:
-        return str(peer[0]), int(peer[1])
+        return _normalize_ip(str(peer[0])), int(peer[1])
     return (str(peer) if peer else "unknown"), None
 
 
@@ -36,19 +53,25 @@ def _client_version(conn: Any) -> Optional[str]:
 class DaygleSSHServer(asyncssh.SSHServer):
     """Records connection metadata and credential guesses; grants nothing."""
 
+    def __init__(self) -> None:
+        self._conn: Any = None
+        self._ip = "unknown"
+        self._port: Optional[int] = None
+        self._event_id: Optional[int] = None
+
     def connection_made(self, conn: Any) -> None:
         self._conn = conn
         self._ip, self._port = _peer(conn)
-        self._event_id: Optional[int] = None
         try:
             self._event_id = db.record_event("connect", self._ip, self._port)
         except Exception:
             log.exception("failed to record connect event")
 
     def connection_lost(self, exc: Optional[Exception]) -> None:
+        if self._event_id is None:
+            return
         try:
-            if self._event_id is not None:
-                db.set_client_version(self._event_id, _client_version(self._conn))
+            db.set_client_version(self._event_id, _client_version(self._conn))
         except Exception:
             log.exception("failed to update client banner")
 
@@ -79,8 +102,8 @@ class DaygleSSHServer(asyncssh.SSHServer):
         try:
             db.record_event(
                 event,
-                getattr(self, "_ip", "unknown"),
-                getattr(self, "_port", None),
+                self._ip,
+                self._port,
                 username=username,
                 detail=detail,
                 client_version=_client_version(self._conn),
@@ -94,9 +117,13 @@ def _load_or_create_host_key() -> Any:
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         key = asyncssh.generate_private_key("ssh-ed25519")
-        key.write_private_key(str(path))
-        path.chmod(0o600)
+        # Create the file 0600 from the start so the private key is never
+        # briefly readable under a permissive umask.
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(key.export_private_key())
         log.info("generated new host key at %s", path)
+        return key
     return asyncssh.read_private_key(str(path))
 
 
