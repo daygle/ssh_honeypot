@@ -12,7 +12,8 @@ services:
       DATA_DIR: /data
       HONEYPOT_PORT: "22"
       WEB_PORT: "8080"
-      # HONEYPOT_BANNER: "SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13"
+      # No "SSH-2.0-" prefix here - asyncssh adds it to the wire banner itself.
+      # HONEYPOT_BANNER: "OpenSSH_9.6p1 Ubuntu-3ubuntu13"
     volumes:
       - daygle-data:/data
     # Hardening: the honeypot faces the internet, so keep it locked down.

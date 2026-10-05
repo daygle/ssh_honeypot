@@ -79,7 +79,7 @@ Environment variables (set under `environment:` in `docker-compose.yml`):
 |---|---|---|
 | `HONEYPOT_HOST` | `0.0.0.0` | Address the decoy SSH service binds to |
 | `HONEYPOT_PORT` | `22` | Port the decoy SSH service listens on |
-| `HONEYPOT_BANNER` | `SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.6` | Banner shown to scanners |
+| `HONEYPOT_BANNER` | `OpenSSH_8.9p1 Ubuntu-3ubuntu0.6` | Banner shown to scanners, without the `SSH-2.0-` prefix (asyncssh adds that) |
 | `HONEYPOT_ENABLED` | `1` | Set `0` to run the dashboard alone |
 | `WEB_HOST` | `0.0.0.0` | Address the dashboard binds to |
 | `WEB_PORT` | `8080` | Dashboard port |

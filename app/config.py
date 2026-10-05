@@ -35,8 +35,10 @@ HONEYPOT_ENABLED = _flag("HONEYPOT_ENABLED", True)
 HONEYPOT_HOST = os.environ.get("HONEYPOT_HOST", "0.0.0.0")
 HONEYPOT_PORT = _int("HONEYPOT_PORT", 22)
 # Advertised SSH banner. Many scanners fingerprint the server first; a
-# plausibly boring banner keeps them talking.
-HONEYPOT_BANNER = os.environ.get("HONEYPOT_BANNER", "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.6")
+# plausibly boring banner keeps them talking. Exclude the "SSH-2.0-" protocol
+# prefix: asyncssh adds it when composing the wire banner, so including it here
+# would emit a doubled "SSH-2.0-SSH-2.0-..." that gives the decoy away.
+HONEYPOT_BANNER = os.environ.get("HONEYPOT_BANNER", "OpenSSH_8.9p1 Ubuntu-3ubuntu0.6")
 
 # Dashboard -----------------------------------------------------------------
 
