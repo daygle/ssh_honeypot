@@ -51,6 +51,31 @@ def _jinja_title(value: str) -> str:
 templates.filters["datefmt"] = _jinja_datefmt
 templates.filters["title"] = _jinja_title
 
+
+def admin_enabled() -> bool:
+    """True when admin credentials are configured (endpoints are live)."""
+    return bool(config.WEB_ADMIN_USER and config.WEB_ADMIN_PASS)
+
+
+def admin_auth(request: Request) -> bool:
+    """Return True when the request presents valid admin basic-auth credentials.
+
+    Requires ``admin_enabled()`` to be True; otherwise the caller should treat
+    the endpoint as disabled (404).
+    """
+    if not admin_enabled():
+        return False
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Basic "):
+        return False
+    import base64
+    try:
+        decoded = base64.b64decode(auth.split(" ", 1)[1]).decode("utf-8")
+        user, sep, password = decoded.partition(":")
+    except Exception:
+        return False
+    return user == config.WEB_ADMIN_USER and password == config.WEB_ADMIN_PASS
+
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
@@ -113,12 +138,22 @@ async def security_headers(request: Request, call_next: Callable[[Request], Awai
 @app.get("/", response_class=HTMLResponse)
 def dashboard() -> HTMLResponse:
     nonce = secrets.token_urlsafe(16)
+    stats = db.get_summary()
+    retention = {
+        "enabled": config.RETENTION_HOURS > 0,
+        "hours": config.RETENTION_HOURS,
+        "older_than": db.count_events_older_than(config.RETENTION_HOURS) if config.RETENTION_HOURS > 0 else 0,
+        "admin_enabled": bool(config.WEB_ADMIN_USER and config.WEB_ADMIN_PASS),
+    }
     html = templates.get_template("dashboard.html").render(
-        stats=db.get_summary(),
+        stats=stats,
         honeypot_port=config.HONEYPOT_PORT,
         csp_nonce=nonce,
         date_format=config.DATE_FORMAT,
         relative_format=config.RELATIVE_FORMAT,
+        retention=retention,
+        web_admin_user=config.WEB_ADMIN_USER or "",
+        web_admin_pass=config.WEB_ADMIN_PASS or "",
     )
     return HTMLResponse(html, headers={"Content-Security-Policy": CSP_TEMPLATE.format(nonce=nonce)})
 
@@ -136,6 +171,62 @@ def api_ips() -> list[dict[str, Any]]:
 @app.get("/ssh-blocklist.txt")
 def blocklist() -> PlainTextResponse:
     return PlainTextResponse(db.blocklist_text())
+
+
+@app.delete("/api/events")
+def admin_purge(request: Request) -> dict[str, Any]:
+    """Admin-only purge: delete events older than N hours and/or for specific IPs.
+
+    Query params:
+      older_than_hours  - purge events older than this many hours (whole table).
+      ips               - comma-separated list of IPs to purge.
+
+    Returns the counts of rows removed for each action.
+    """
+    if not admin_enabled():
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=404, content={"detail": "admin endpoints disabled"})
+    if not admin_auth(request):
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=401, content={"detail": "admin auth required"})
+
+    older_than = request.query_params.get("older_than_hours")
+    older_hours: int | None = None
+    if older_than is not None:
+        try:
+            older_hours = int(older_than)
+        except ValueError:
+            return {"error": "older_than_hours must be an integer"}
+
+    ips_raw = request.query_params.get("ips", "")
+    ips = [ip.strip() for ip in ips_raw.split(",") if ip.strip()] if ips_raw else []
+
+    removed_older = db.delete_events_older_than(older_hours) if older_hours else 0
+    removed_ips = db.delete_events_for_ips(ips) if ips else 0
+
+    return {
+        "removed_older_than_hours": removed_older,
+        "older_than_hours": older_hours,
+        "removed_ips": removed_ips,
+        "ips": ips,
+        "total_removed": removed_older + removed_ips,
+    }
+
+
+@app.delete("/api/events/{event_id:int}")
+def admin_delete_event(request: Request, event_id: int) -> dict[str, Any]:
+    """Admin-only delete of a single event by id."""
+    if not admin_enabled():
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=404, content={"detail": "admin endpoints disabled"})
+    if not admin_auth(request):
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=401, content={"detail": "admin auth required"})
+    ok = db.delete_event(event_id)
+    if not ok:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=404, content={"detail": "event not found"})
+    return {"deleted": event_id, "ok": True}
 
 
 @app.get("/export.csv")

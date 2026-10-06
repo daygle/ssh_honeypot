@@ -329,6 +329,11 @@
   .format-control { display: inline-flex; align-items: center; gap: .35rem; }
   .format-control .chip { font-size: .72rem; padding: .28rem .5rem; }
   .format-control select { font-family: var(--mono); font-size: .72rem; }
+  .ev-del { margin-left: .4rem; font-size: .7rem; padding: .18rem .42rem; }
+  .ev-del:hover { border-color: rgba(255, 107, 129, .6); color: var(--rose); }
+  .ev-del.confirm { border-color: var(--rose); color: var(--rose); }
+  .retention-body { margin-top: .25rem; }
+  .retention-body p { margin: 0; font-size: .82rem; color: var(--muted); }
 
   /* ---------- footer ---------- */
   footer {
@@ -445,6 +450,27 @@
       </article>
     </div>
 
+    {% if retention.enabled %}
+    <article class="panel" id="retention">
+      <div class="panel-head">
+        <h2>Retention</h2>
+        <span class="hint">Auto-Purge Of Events Older Than {{ retention.hours }} Hours</span>
+        <span class="spacer"></span>
+        <span class="chip" id="retention-count">{{ retention.older_than }} events older than {{ retention.hours }}h</span>
+      </div>
+      <div class="retention-body">
+        <p>
+          Events older than <strong>{{ retention.hours }} hours</strong> are automatically removed.
+          {% if retention.admin_enabled %}
+          <button class="chip" id="purge-now" type="button">Purge Now</button>
+          {% else %}
+          <span class="dimmed">Admin credentials not configured — set WEB_ADMIN_USER / WEB_ADMIN_PASS to enable manual purge.</span>
+          {% endif %}
+        </p>
+      </div>
+    </article>
+    {% endif %}
+
     <div class="grid-two">
       <article class="panel">
         <div class="panel-head">
@@ -514,6 +540,13 @@
               <td class="mono muted">{{ e.username or '-' }}</td>
               <td class="mono muted">{{ e.detail or '-' }}</td>
               <td class="mono dimmed">{{ e.client_version or '-' }}</td>
+              <td class="mono dimmed">
+                {% if retention.admin_enabled %}
+                <button class="chip ev-del" data-id="{{ e.id }}" type="button" aria-label="Delete event {{ e.id }}">Delete</button>
+                {% else %}
+                <span class="dimmed">admin</span>
+                {% endif %}
+              </td>
             </tr>
             {% else %}
             <tr class="empty-row"><td colspan="7">No attempts recorded yet - the honeypot is listening.</td></tr>
@@ -535,7 +568,7 @@
       <ul class="feed" id="feed-list">
         {% for row in stats.ips %}
         <li>
-          <span class="ip">{{ row.ip }}</span>
+          <span class="ip">{{ row.ip }}{% if retention.admin_enabled %} <button class="chip ev-del" data-ip="{{ row.ip }}" type="button" aria-label="Delete all events for {{ row.ip }}">Del</button>{% endif %}</span>
           <span class="meta">{{ row.connections }} conn · {{ row.auth_attempts }} auth · last {{ row.last_seen | datefmt }}</span>
         </li>
         {% else %}
@@ -796,6 +829,101 @@
   function tickClock() {
     $('#utc-clock').textContent = new Date().toISOString().slice(11, 19) + ' UTC';
   }
+
+  // ---- Admin deletion UI ----
+  const ADMIN_USER = {{ (WEB_ADMIN_USER if WEB_ADMIN_USER else '') | tojson }};
+  const ADMIN_PASS = {{ (WEB_ADMIN_PASS if WEB_ADMIN_PASS else '') | tojson }};
+
+  async function adminFetch(path, init = {}) {
+    const headers = new Headers(init.headers || {});
+    if (ADMIN_USER && ADMIN_PASS) {
+      headers.set('Authorization', 'Basic ' + btoa(ADMIN_USER + ':' + ADMIN_PASS));
+    }
+    const res = await fetch(path, { ...init, headers });
+    if (res.status === 401) {
+      // Credentials not configured or wrong; surface a clear message.
+      throw new Error('not authorized');
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || ('request failed: ' + res.status));
+    }
+    return res.json();
+  }
+
+  function delButtonState(btn, state) {
+    if (state === 'loading') {
+      btn.disabled = true;
+      btn.textContent = '…';
+      btn.classList.add('confirm');
+    } else if (state === 'ok') {
+      btn.textContent = 'Deleted';
+      btn.disabled = true;
+      btn.classList.add('confirm');
+      setTimeout(() => { if (btn.parentNode) btn.remove(); }, 1200);
+    } else if (state === 'err') {
+      btn.disabled = false;
+      btn.textContent = 'Retry';
+      btn.classList.remove('confirm');
+    }
+  }
+
+  async function deleteEvent(id) {
+    const btn = document.querySelector(`.ev-del[data-id="${id}"]`);
+    if (!btn) return;
+    delButtonState(btn, 'loading');
+    try {
+      await adminFetch('/api/events/' + encodeURIComponent(id), { method: 'DELETE' });
+      delButtonState(btn, 'ok');
+      // Refresh the dashboard so the row disappears from recent + feed + stats.
+      await refresh();
+    } catch (err) {
+      delButtonState(btn, 'err');
+    }
+  }
+
+  async function deleteIp(ip) {
+    const btns = document.querySelectorAll(`.ev-del[data-ip="${CSS.escape(ip)}"]`);
+    btns.forEach((b) => delButtonState(b, 'loading'));
+    try {
+      await adminFetch('/api/events?ips=' + encodeURIComponent(ip), { method: 'DELETE' });
+      btns.forEach((b) => delButtonState(b, 'ok'));
+      await refresh();
+    } catch (err) {
+      btns.forEach((b) => delButtonState(b, 'err'));
+    }
+  }
+
+  async function purgeNow() {
+    const btn = $('#purge-now');
+    if (!btn) return;
+    delButtonState(btn, 'loading');
+    try {
+      const hours = {{ retention.hours | tojson }};
+      const res = await adminFetch('/api/events?older_than_hours=' + encodeURIComponent(hours), { method: 'DELETE' });
+      delButtonState(btn, 'ok');
+      const msg = document.createElement('span');
+      msg.className = 'chip';
+      msg.style.marginLeft = ' .5rem';
+      msg.textContent = `Purged ${res.total_removed} events`;
+      btn.after(msg);
+      setTimeout(() => { if (msg.parentNode) msg.remove(); }, 4000);
+      await refresh();
+    } catch (err) {
+      delButtonState(btn, 'err');
+    }
+  }
+
+  document.addEventListener('click', (ev) => {
+    const del = ev.target.closest('.ev-del');
+    if (!del) return;
+    ev.preventDefault();
+    if (del.dataset.id) deleteEvent(del.dataset.id);
+    else if (del.dataset.ip) deleteIp(del.dataset.ip);
+  });
+
+  const purgeBtn = $('#purge-now');
+  if (purgeBtn) purgeBtn.addEventListener('click', purgeNow);
 
   $('#copy-ips').addEventListener('click', async () => {
     try {

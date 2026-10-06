@@ -23,6 +23,20 @@ def _int(name: str, default: int) -> int:
         raise ValueError(f"{name} must be an integer, got {raw!r}") from None
 
 
+def _positive_int(name: str, default: int) -> int:
+    """Like _int but rejects values below 1 (for retention-visible ceilings)."""
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ValueError(f"{name} must be an integer, got {raw!r}") from None
+    if value < 1:
+        raise ValueError(f"{name} must be >= 1, got {value}") from None
+    return value
+
+
 # Storage -------------------------------------------------------------------
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "data")).expanduser()
@@ -45,6 +59,18 @@ HONEYPOT_BANNER = os.environ.get("HONEYPOT_BANNER", "OpenSSH_8.9p1 Ubuntu-3ubunt
 WEB_HOST = os.environ.get("WEB_HOST", "0.0.0.0")
 # Some hosting platforms inject PORT; standalone runs use WEB_PORT.
 WEB_PORT = _int("WEB_PORT", _int("PORT", 8080))
+
+# Admin / deletion ----------------------------------------------------------
+# Basic-auth credentials for the admin deletion/purge endpoints. If either
+# is empty the admin endpoints are disabled (return 404) so a default
+# install is not accidentally exposed.
+WEB_ADMIN_USER = os.environ.get("WEB_ADMIN_USER", "").strip()
+WEB_ADMIN_PASS = os.environ.get("WEB_ADMIN_PASS", "").strip()
+
+# Retention ------------------------------------------------------------------
+# Auto-purge events older than this many hours. Set to 0 to disable automatic
+# purging (manual purge endpoints are still available to admins).
+RETENTION_HOURS = _int("RETENTION_HOURS", 0)
 
 # Dashboard display preferences ------------------------------------------------
 # Jinja date/time format used for event timestamps, feed timestamps and the

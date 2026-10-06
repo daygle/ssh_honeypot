@@ -245,3 +245,42 @@ def iter_events_csv(batch_size: int = 1000) -> Iterator[str]:
 
 def events_csv() -> str:
     return "".join(iter_events_csv())
+
+
+# Deletion helpers -----------------------------------------------------------
+
+def delete_event(event_id: int) -> bool:
+    """Delete a single event by id. Returns True if a row was removed."""
+    with _connect() as conn:
+        cur = conn.execute("DELETE FROM events WHERE id = ?", (event_id,))
+        return bool(cur.rowcount)
+
+
+def delete_events_for_ips(ips: list[str]) -> int:
+    """Delete all events whose source IP is in `ips`. Returns rows removed."""
+    if not ips:
+        return 0
+    with _connect() as conn:
+        conn.execute("DELETE FROM events WHERE ip IN ({})".format(", ".join("?" * len(ips))), ips)
+        return int(conn.total_changes - getattr(conn, "_prev_total_changes", 0))
+
+
+def delete_events_older_than(hours: int) -> int:
+    """Delete events older than `hours` hours. Returns rows removed."""
+    if hours <= 0:
+        return 0
+    with _connect() as conn:
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime(TS_FORMAT)
+        cur = conn.execute("DELETE FROM events WHERE ts < ?", (cutoff,))
+        return int(cur.rowcount)
+
+
+def count_events_older_than(hours: int) -> int:
+    """How many events are older than `hours` hours (for retention UI)."""
+    if hours <= 0:
+        return 0
+    conn = _connect()
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime(TS_FORMAT)
+    row = conn.execute("SELECT COUNT(*) AS c FROM events WHERE ts < ?", (cutoff,)).fetchone()
+    return int(row["c"]) if row else 0
+
