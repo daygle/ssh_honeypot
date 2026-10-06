@@ -11,6 +11,7 @@ from typing import Any, AsyncIterator, Awaitable, Callable
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, PlainTextResponse, StreamingResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from datetime import datetime, timezone
 
 from . import config, db, honeypot
 
@@ -20,6 +21,35 @@ templates = Environment(
     loader=FileSystemLoader(Path(__file__).resolve().parent / "templates"),
     autoescape=select_autoescape(["html", "xml"]),
 )
+
+
+def _jinja_datefmt(ts: str, fmt: str | None = None) -> str:
+    """Render an ISO-UTC timestamp string with a strftime-style format.
+
+    The dashboard stores timestamps as ``%Y-%m-%dT%H:%M:%SZ``; this helper
+    parses that form and applies the user-facing DATE_FORMAT.
+    """
+    if not ts:
+        return "-"
+    try:
+        # Accept both the canonical Z form and a bare space form from older rows.
+        clean = ts.replace("Z", "").strip()
+        dt = datetime.strptime(clean, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return ts
+    format = fmt or config.DATE_FORMAT
+    return dt.strftime(format)
+
+
+def _jinja_title(value: str) -> str:
+    """Title-case an event label for display (connect -> Connect)."""
+    if not value:
+        return value
+    return value.title()
+
+
+templates.filters["datefmt"] = _jinja_datefmt
+templates.filters["title"] = _jinja_title
 
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
@@ -87,6 +117,8 @@ def dashboard() -> HTMLResponse:
         stats=db.get_summary(),
         honeypot_port=config.HONEYPOT_PORT,
         csp_nonce=nonce,
+        date_format=config.DATE_FORMAT,
+        relative_format=config.RELATIVE_FORMAT,
     )
     return HTMLResponse(html, headers={"Content-Security-Policy": CSP_TEMPLATE.format(nonce=nonce)})
 

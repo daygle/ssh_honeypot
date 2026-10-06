@@ -111,8 +111,13 @@ def test_dashboard_escapes_attacker_strings(client):
 
     res = client.get("/")
 
-    assert "<script>alert(1)</script>" not in res.text
-    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in res.text
+    html = res.text
+    # Raw markup must never appear unescaped.
+    assert "<script>alert(1)</script>" not in html
+    # Username is escaped (the point of this test).
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+    # Event pill is title-cased in the UI.
+    assert "<span class=\"badge ev-password\">Password</span>" in html
 
 
 def test_api_docs_disabled(client):

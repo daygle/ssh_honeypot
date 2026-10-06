@@ -45,3 +45,12 @@ HONEYPOT_BANNER = os.environ.get("HONEYPOT_BANNER", "OpenSSH_8.9p1 Ubuntu-3ubunt
 WEB_HOST = os.environ.get("WEB_HOST", "0.0.0.0")
 # Some hosting platforms inject PORT; standalone runs use WEB_PORT.
 WEB_PORT = _int("WEB_PORT", _int("PORT", 8080))
+
+# Dashboard display preferences ------------------------------------------------
+# Jinja date/time format used for event timestamps, feed timestamps and the
+# generated-at footer line. Defaults to the existing UTC space-separated form.
+DATE_FORMAT = os.environ.get("DATE_FORMAT", "%Y-%m-%d %H:%M:%S UTC")
+# Relative-time style used for "last seen" / hero hints. One of:
+#   "compact"  -> 2h ago / 3d ago
+#   "verbose"  -> 2 hours ago / 3 days ago
+RELATIVE_FORMAT = os.environ.get("RELATIVE_FORMAT", "compact")

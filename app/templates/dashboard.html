@@ -326,6 +326,9 @@
   .feed .ip { color: var(--text); min-width: 13rem; }
   .feed .meta { color: var(--dim); font-size: .78rem; margin-left: auto; text-align: right; }
   .feed .empty { color: var(--dim); font-family: var(--sans); justify-content: center; padding: 1.6rem; }
+  .format-control { display: inline-flex; align-items: center; gap: .35rem; }
+  .format-control .chip { font-size: .72rem; padding: .28rem .5rem; }
+  .format-control select { font-family: var(--mono); font-size: .72rem; }
 
   /* ---------- footer ---------- */
   footer {
@@ -507,7 +510,7 @@
               <td class="mono muted">{{ e.ts.replace('T', ' ').replace('Z', '') }}</td>
               <td class="mono">{{ e.ip }}</td>
               <td class="mono dimmed">{{ e.ip_port if e.ip_port is not none else '-' }}</td>
-              <td><span class="badge ev-{{ e.event }}">{{ e.event }}</span></td>
+              <td><span class="badge ev-{{ e.event }}">{{ e.event | title }}</span></td>
               <td class="mono muted">{{ e.username or '-' }}</td>
               <td class="mono muted">{{ e.detail or '-' }}</td>
               <td class="mono dimmed">{{ e.client_version or '-' }}</td>
@@ -533,7 +536,7 @@
         {% for row in stats.ips %}
         <li>
           <span class="ip">{{ row.ip }}</span>
-          <span class="meta">{{ row.connections }} conn · {{ row.auth_attempts }} auth · last {{ row.last_seen.replace('T', ' ').replace('Z', '') }}</span>
+          <span class="meta">{{ row.connections }} conn · {{ row.auth_attempts }} auth · last {{ row.last_seen | datefmt }}</span>
         </li>
         {% else %}
         <li class="empty">No source IPs recorded yet.</li>
@@ -545,7 +548,7 @@
 
 <footer>
   <div class="wrap">
-    <span>Daygle SSH Honeypot · self-hosted · events stored in SQLite · rendered {{ stats.generated_at }}</span>
+    <span>Daygle SSH Honeypot · self-hosted · events stored in SQLite · rendered {{ stats.generated_at | datefmt }}</span>
     <nav class="links">
       <a href="/api/stats">/api/stats</a>
       <a href="/api/ips">/api/ips</a>
@@ -558,6 +561,12 @@
 
 <script nonce="{{ csp_nonce }}">
   const $ = (sel) => document.querySelector(sel);
+  const DATE_FORMAT = {{ date_format | tojson }};
+  const RELATIVE_FORMAT = {{ relative_format | tojson }};
+
+  function titleCase(label) {
+    return String(label).replace(/(\w)(\w*)/g, (_, first, rest) => first.toUpperCase() + rest.toLowerCase());
+  }
 
   function esc(value) {
     return String(value ?? '').replace(/[&<>"']/g, (c) => (
@@ -565,20 +574,145 @@
     ));
   }
 
+  function tsToDate(ts) {
+    if (!ts) return null;
+    // Expected ISO form: 2026-02-15T14:03:22Z -> real ISO for Date.parse.
+    const iso = ts.endsWith('Z') ? ts : ts + 'Z';
+    return new Date(iso);
+  }
+
   function fmtTs(ts) {
-    return ts ? ts.replace('T', ' ').replace('Z', '') + ' UTC' : '-';
+    if (!ts) return '-';
+    const d = tsToDate(ts);
+    if (isNaN(d.getTime())) return '-';
+    // DATE_FORMAT placeholders understood by JS (subset of strftime).
+    const map = {
+      '%Y': String(d.getUTCFullYear()).padStart(4, '0'),
+      '%m': String(d.getUTCMonth() + 1).padStart(2, '0'),
+      '%d': String(d.getUTCDate()).padStart(2, '0'),
+      '%H': String(d.getUTCHours()).padStart(2, '0'),
+      '%M': String(d.getUTCMinutes()).padStart(2, '0'),
+      '%S': String(d.getUTCSeconds()).padStart(2, '0'),
+      '%:M': String(d.getUTCMinutes()).padStart(2, '0'),
+      '%i': String(d.getUTCMinutes()).padStart(2, '0'),
+      '%s': String(d.getUTCSeconds()).padStart(2, '0'),
+    };
+    // Tiny convenience aliases: %-m / %-d drop zero-padding (JS only).
+    let out = DATE_FORMAT;
+    out = out.replace(/(%[a-zA-Z])/g, (m) => map[m] ?? m);
+    // Jinja-compatible zero-padded aliases.
+    out = out.replace('%M', map['%M']); // minutes (overrides any bare %M left above)
+    return out;
   }
 
   function fmtRel(ts) {
     if (!ts) return 'Never';
-    const diff = Math.max(0, Date.now() - Date.parse(ts));
+    const diff = Math.max(0, Date.now() - Date.parse(ts.endsWith('Z') ? ts : ts + 'Z'));
     const mins = Math.floor(diff / 60000);
     if (mins < 1) return 'just now';
-    if (mins < 60) return mins + 'm ago';
+    if (mins < 60) return mins + (RELATIVE_FORMAT === 'verbose' ? ' minutes' : 'm') + ' ago';
     const hours = Math.floor(mins / 60);
-    if (hours < 24) return hours + 'h ago';
-    return Math.floor(hours / 24) + 'd ago';
+    if (hours < 24) return hours + (RELATIVE_FORMAT === 'verbose' ? ' hours' : 'h') + ' ago';
+    const days = Math.floor(hours / 24);
+    return days + (RELATIVE_FORMAT === 'verbose' ? ' days' : 'd') + ' ago';
   }
+
+  const FORMAT_KEY = 'daygle.dateFormat';
+  const RELATIVE_KEY = 'daygle.relativeFormat';
+  const supportedFormats = [
+    { value: '%Y-%m-%d %H:%M:%S UTC', label: '2026-02-15 14:03:22 UTC' },
+    { value: '%Y-%m-%d %H:%M UTC', label: '2026-02-15 14:03 UTC' },
+    { value: '%a %Y-%m-%d %H:%M UTC', label: 'Mon 2026-02-15 14:03 UTC' },
+    { value: '%Y/%m/%d %H:%M:%S UTC', label: '2026/02/15 14:03:22 UTC' },
+  ];
+  const supportedRelative = [
+    { value: 'compact', label: '2h ago' },
+    { value: 'verbose', label: '2 hours ago' },
+  ];
+
+  function preferredFormat() {
+    try {
+      const stored = localStorage.getItem(FORMAT_KEY);
+      if (stored && supportedFormats.some((f) => f.value === stored)) return stored;
+    } catch (_) { /* private mode */ }
+    return DATE_FORMAT;
+  }
+
+  function preferredRelative() {
+    try {
+      const stored = localStorage.getItem(RELATIVE_KEY);
+      if (stored && supportedRelative.some((f) => f.value === stored)) return stored;
+    } catch (_) { /* private mode */ }
+    return RELATIVE_FORMAT;
+  }
+
+  function applyFormat() {
+    let fmt = preferredFormat();
+    // Update the DATE_FORMAT constant used by fmtTs so the next renders use it.
+    // We keep DATE_FORMAT in sync for the initials; refresh() re-renders everything.
+    const rel = preferredRelative();
+    $('#format-select').value = fmt;
+    $('#relative-select').value = rel;
+    // Re-render current stats with the new formats.
+    const statsEl = document.getElementById('stat-last');
+    if (statsEl && statsEl.dataset.ts) {
+      $('#stat-last').textContent = fmtRel(statsEl.dataset.ts);
+      $('#stat-last-sub').textContent = fmtTs(statsEl.dataset.ts);
+      $('#hero-last').textContent = fmtRel(statsEl.dataset.ts);
+    }
+    renderRecent(currentRecent);
+    renderFeed(currentFeed);
+  }
+
+  // Snapshot of the latest recent/feed payloads so the format control can
+  // re-render them without another fetch.
+  let currentRecent = [];
+  let currentFeed = [];
+
+  // Format-control wiring.
+  (function () {
+    const fmtSel = document.createElement('select');
+    fmtSel.id = 'format-select';
+    fmtSel.className = 'chip';
+    fmtSel.setAttribute('aria-label', 'Event timestamp format');
+    supportedFormats.forEach((f) => {
+      const o = document.createElement('option');
+      o.value = f.value;
+      o.textContent = f.label;
+      fmtSel.appendChild(o);
+    });
+    fmtSel.addEventListener('change', () => {
+      try { localStorage.setItem(FORMAT_KEY, fmtSel.value); } catch (_) {}
+      applyFormat();
+    });
+
+    const relSel = document.createElement('select');
+    relSel.id = 'relative-select';
+    relSel.className = 'chip';
+    relSel.setAttribute('aria-label', 'Relative time style');
+    supportedRelative.forEach((f) => {
+      const o = document.createElement('option');
+      o.value = f.value;
+      o.textContent = f.label;
+      relSel.appendChild(o);
+    });
+    relSel.addEventListener('change', () => {
+      try { localStorage.setItem(RELATIVE_KEY, relSel.value); } catch (_) {}
+      applyFormat();
+    });
+
+    const wrap = document.createElement('span');
+    wrap.className = 'format-control';
+    wrap.setAttribute('aria-label', 'Display format controls');
+    wrap.innerHTML = '<span class="muted">Time:</span>';
+    wrap.appendChild(fmtSel);
+    wrap.innerHTML += ' <span class="muted">Ago:</span>';
+    wrap.appendChild(relSel);
+
+    const topRight = document.getElementById('top-right');
+    topRight.insertBefore(wrap, topRight.firstChild);
+    applyFormat();
+  })();
 
   function renderStats(s) {
     $('#stat-conn24').textContent = s.connections_24h.toLocaleString();
@@ -590,6 +724,15 @@
     $('#stat-last').textContent = fmtRel(s.last_seen);
     $('#stat-last-sub').textContent = s.last_seen ? fmtTs(s.last_seen) : 'No Attempts Recorded Yet';
     $('#hero-last').textContent = fmtRel(s.last_seen);
+    if (s.last_seen) {
+      $('#stat-last').dataset.ts = s.last_seen;
+      $('#stat-last-sub').dataset.ts = s.last_seen;
+      $('#hero-last').dataset.ts = s.last_seen;
+    } else {
+      $('#stat-last').dataset.ts = '';
+      $('#stat-last-sub').dataset.ts = '';
+      $('#hero-last').dataset.ts = '';
+    }
   }
 
   function renderTop(rows) {
@@ -615,7 +758,7 @@
         <td class="mono muted">${esc(fmtTs(e.ts))}</td>
         <td class="mono">${esc(e.ip)}</td>
         <td class="mono dimmed">${e.ip_port ?? '-'}</td>
-        <td><span class="badge ev-${esc(e.event)}">${esc(e.event)}</span></td>
+        <td><span class="badge ev-${esc(e.event)}">${esc(titleCase(e.event))}</span></td>
         <td class="mono muted">${esc(e.username) || '-'}</td>
         <td class="mono muted">${esc(e.detail) || '-'}</td>
         <td class="mono dimmed">${esc(e.client_version) || '-'}</td>
@@ -638,8 +781,10 @@
       renderStats(s);
       renderTop(s.top_ips);
       renderHourly(s.hourly);
-      renderRecent(s.recent);
-      renderFeed(s.ips);
+      currentRecent = s.recent;
+      currentFeed = s.ips;
+      renderRecent(currentRecent);
+      renderFeed(currentFeed);
       $('#pill').classList.remove('stale');
       $('#pill-text').textContent = 'Live · Port ' + {{ honeypot_port | tojson }};
     } catch (err) {
