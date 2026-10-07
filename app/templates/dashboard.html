@@ -328,6 +328,8 @@
   .feed .empty { color: var(--dim); font-family: var(--sans); justify-content: center; padding: 1.6rem; }
   .format-control { display: inline-flex; align-items: center; gap: .35rem; }
   .format-control .chip { font-size: .72rem; padding: .28rem .5rem; }
+  .format-control select { max-width: 12rem; }
+  .muted { color: var(--muted); }
   .format-control select { font-family: var(--mono); font-size: .72rem; }
   .ev-del { margin-left: .4rem; font-size: .7rem; padding: .18rem .42rem; }
   .ev-del:hover { border-color: rgba(255, 107, 129, .6); color: var(--rose); }
@@ -380,8 +382,26 @@
       <a href="#activity">Activity</a>
       <a href="#feed">SSH Blocklist Feed</a>
     </nav>
-    <div class="top-right">
-      <span class="clock mono" id="utc-clock">--:--:-- UTC</span>
+    <div class="top-right" id="top-right">
+      <span class="clock mono" id="utc-clock">--:--:--</span>
+      <span class="format-control" aria-label="Display preferences">
+        <label class="muted" for="format-select">Format</label>
+        <select class="chip" id="format-select" aria-label="Date and time format">
+          <option value="{{ date_format }}">2026-02-15 14:03:22</option>
+          <option value="%Y-%m-%d %H:%M %Z">2026-02-15 14:03</option>
+          <option value="%a %Y-%m-%d %H:%M %Z">Mon 2026-02-15 14:03</option>
+          <option value="%m/%d/%Y %I:%M:%S %p %Z">02/15/2026 02:03:22 PM</option>
+        </select>
+        <label class="muted" for="timezone-select">Zone</label>
+        <select class="chip" id="timezone-select" aria-label="Timezone"></select>
+      </span>
+      <span class="format-control">
+        <label class="muted" for="relative-select">Ago</label>
+        <select class="chip" id="relative-select" aria-label="Relative time style">
+          <option value="compact">2h</option>
+          <option value="verbose">2 hours</option>
+        </select>
+      </span>
       <span class="pill" id="pill"><span class="dot"></span><span id="pill-text">Live · Port {{ honeypot_port }}</span></span>
     </div>
   </div>
@@ -516,18 +536,20 @@
         <span class="hint">Newest First</span>
         <span class="spacer"></span>
         <a class="chip" href="/export.csv">Export CSV</a>
+        {% if retention.admin_enabled %}<button class="chip" id="purge-all" type="button">Delete All Records</button>{% endif %}
       </div>
       <div class="table-scroll">
         <table>
           <thead>
             <tr>
-              <th>Time (UTC)</th>
+              <th>Time</th>
               <th>Source IP</th>
               <th>Port</th>
               <th>Event</th>
               <th>Username</th>
               <th>Credential</th>
               <th>Client Banner</th>
+              {% if retention.admin_enabled %}<th>Actions</th>{% endif %}
             </tr>
           </thead>
           <tbody id="recent-body">
@@ -540,16 +562,12 @@
               <td class="mono muted">{{ e.username or '-' }}</td>
               <td class="mono muted">{{ e.detail or '-' }}</td>
               <td class="mono dimmed">{{ e.client_version or '-' }}</td>
-              <td class="mono dimmed">
-                {% if retention.admin_enabled %}
+              {% if retention.admin_enabled %}<td class="mono dimmed">
                 <button class="chip ev-del" data-id="{{ e.id }}" type="button" aria-label="Delete event {{ e.id }}">Delete</button>
-                {% else %}
-                <span class="dimmed">admin</span>
-                {% endif %}
-              </td>
+              </td>{% endif %}
             </tr>
             {% else %}
-            <tr class="empty-row"><td colspan="7">No attempts recorded yet - the honeypot is listening.</td></tr>
+            <tr class="empty-row"><td colspan="{{ 8 if retention.admin_enabled else 7 }}">No attempts recorded yet - the honeypot is listening.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -581,7 +599,7 @@
 
 <footer>
   <div class="wrap">
-    <span>Daygle SSH Honeypot · self-hosted · events stored in SQLite · rendered {{ stats.generated_at | datefmt }}</span>
+    <span>Daygle SSH Honeypot · self-hosted · events stored in SQLite · rendered <span id="generated-at" data-ts="{{ stats.generated_at }}">{{ stats.generated_at | datefmt }}</span></span>
     <nav class="links">
       <a href="/api/stats">/api/stats</a>
       <a href="/api/ips">/api/ips</a>
@@ -594,8 +612,13 @@
 
 <script nonce="{{ csp_nonce }}">
   const $ = (sel) => document.querySelector(sel);
-  const DATE_FORMAT = {{ date_format | tojson }};
-  const RELATIVE_FORMAT = {{ relative_format | tojson }};
+  const DEFAULT_DATE_FORMAT = {{ date_format | tojson }};
+  const DEFAULT_RELATIVE_FORMAT = {{ relative_format | tojson }};
+  const CAN_DELETE = {{ retention.admin_enabled | tojson }};
+  const RECENT_COLSPAN = CAN_DELETE ? 8 : 7;
+  let activeDateFormat = DEFAULT_DATE_FORMAT;
+  let activeTimezone = 'UTC';
+  let activeRelativeFormat = DEFAULT_RELATIVE_FORMAT;
 
   function titleCase(label) {
     return String(label).replace(/(\w)(\w*)/g, (_, first, rest) => first.toUpperCase() + rest.toLowerCase());
@@ -617,25 +640,21 @@
   function fmtTs(ts) {
     if (!ts) return '-';
     const d = tsToDate(ts);
-    if (isNaN(d.getTime())) return '-';
-    // DATE_FORMAT placeholders understood by JS (subset of strftime).
-    const map = {
-      '%Y': String(d.getUTCFullYear()).padStart(4, '0'),
-      '%m': String(d.getUTCMonth() + 1).padStart(2, '0'),
-      '%d': String(d.getUTCDate()).padStart(2, '0'),
-      '%H': String(d.getUTCHours()).padStart(2, '0'),
-      '%M': String(d.getUTCMinutes()).padStart(2, '0'),
-      '%S': String(d.getUTCSeconds()).padStart(2, '0'),
-      '%:M': String(d.getUTCMinutes()).padStart(2, '0'),
-      '%i': String(d.getUTCMinutes()).padStart(2, '0'),
-      '%s': String(d.getUTCSeconds()).padStart(2, '0'),
+    if (!d || isNaN(d.getTime())) return '-';
+    const zone = activeTimezone || 'UTC';
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit',
+      weekday: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hourCycle: 'h23', timeZoneName: 'short'
+    }).formatToParts(d).reduce((acc, part) => ({ ...acc, [part.type]: part.value }), {});
+    const values = {
+      '%Y': parts.year, '%m': parts.month, '%d': parts.day,
+      '%H': parts.hour, '%M': parts.minute, '%S': parts.second,
+      '%a': parts.weekday, '%Z': parts.timeZoneName,
+      '%I': String((Number(parts.hour) % 12) || 12).padStart(2, '0'),
+      '%p': Number(parts.hour) < 12 ? 'AM' : 'PM'
     };
-    // Tiny convenience aliases: %-m / %-d drop zero-padding (JS only).
-    let out = DATE_FORMAT;
-    out = out.replace(/(%[a-zA-Z])/g, (m) => map[m] ?? m);
-    // Jinja-compatible zero-padded aliases.
-    out = out.replace('%M', map['%M']); // minutes (overrides any bare %M left above)
-    return out;
+    return activeDateFormat.replace(/%[YmdHMSZaIp]/g, (token) => values[token] ?? token);
   }
 
   function fmtRel(ts) {
@@ -643,109 +662,70 @@
     const diff = Math.max(0, Date.now() - Date.parse(ts.endsWith('Z') ? ts : ts + 'Z'));
     const mins = Math.floor(diff / 60000);
     if (mins < 1) return 'just now';
-    if (mins < 60) return mins + (RELATIVE_FORMAT === 'verbose' ? ' minutes' : 'm') + ' ago';
+    if (mins < 60) return mins + (activeRelativeFormat === 'verbose' ? ' minutes' : 'm') + ' ago';
     const hours = Math.floor(mins / 60);
-    if (hours < 24) return hours + (RELATIVE_FORMAT === 'verbose' ? ' hours' : 'h') + ' ago';
+    if (hours < 24) return hours + (activeRelativeFormat === 'verbose' ? ' hours' : 'h') + ' ago';
     const days = Math.floor(hours / 24);
-    return days + (RELATIVE_FORMAT === 'verbose' ? ' days' : 'd') + ' ago';
+    return days + (activeRelativeFormat === 'verbose' ? ' days' : 'd') + ' ago';
   }
 
   const FORMAT_KEY = 'daygle.dateFormat';
+  const TIMEZONE_KEY = 'daygle.timezone';
   const RELATIVE_KEY = 'daygle.relativeFormat';
-  const supportedFormats = [
-    { value: '%Y-%m-%d %H:%M:%S UTC', label: '2026-02-15 14:03:22 UTC' },
-    { value: '%Y-%m-%d %H:%M UTC', label: '2026-02-15 14:03 UTC' },
-    { value: '%a %Y-%m-%d %H:%M UTC', label: 'Mon 2026-02-15 14:03 UTC' },
-    { value: '%Y/%m/%d %H:%M:%S UTC', label: '2026/02/15 14:03:22 UTC' },
-  ];
-  const supportedRelative = [
-    { value: 'compact', label: '2h ago' },
-    { value: 'verbose', label: '2 hours ago' },
-  ];
-
-  function preferredFormat() {
-    try {
-      const stored = localStorage.getItem(FORMAT_KEY);
-      if (stored && supportedFormats.some((f) => f.value === stored)) return stored;
-    } catch (_) { /* private mode */ }
-    return DATE_FORMAT;
-  }
-
-  function preferredRelative() {
-    try {
-      const stored = localStorage.getItem(RELATIVE_KEY);
-      if (stored && supportedRelative.some((f) => f.value === stored)) return stored;
-    } catch (_) { /* private mode */ }
-    return RELATIVE_FORMAT;
-  }
+  let currentRecent = [];
+  let currentFeed = [];
 
   function applyFormat() {
-    let fmt = preferredFormat();
-    // Update the DATE_FORMAT constant used by fmtTs so the next renders use it.
-    // We keep DATE_FORMAT in sync for the initials; refresh() re-renders everything.
-    const rel = preferredRelative();
-    $('#format-select').value = fmt;
-    $('#relative-select').value = rel;
-    // Re-render current stats with the new formats.
-    const statsEl = document.getElementById('stat-last');
+    activeDateFormat = $('#format-select').value || DEFAULT_DATE_FORMAT;
+    activeTimezone = $('#timezone-select').value || 'UTC';
+    activeRelativeFormat = $('#relative-select').value || DEFAULT_RELATIVE_FORMAT;
+    const statsEl = $('#stat-last');
     if (statsEl && statsEl.dataset.ts) {
-      $('#stat-last').textContent = fmtRel(statsEl.dataset.ts);
+      statsEl.textContent = fmtRel(statsEl.dataset.ts);
       $('#stat-last-sub').textContent = fmtTs(statsEl.dataset.ts);
       $('#hero-last').textContent = fmtRel(statsEl.dataset.ts);
+      $('#utc-clock').textContent = fmtTs(new Date().toISOString());
     }
+    const generatedAt = $('#generated-at');
+    if (generatedAt) generatedAt.textContent = fmtTs(generatedAt.dataset.ts);
     renderRecent(currentRecent);
     renderFeed(currentFeed);
   }
 
-  // Snapshot of the latest recent/feed payloads so the format control can
-  // re-render them without another fetch.
-  let currentRecent = [];
-  let currentFeed = [];
-
-  // Format-control wiring.
-  (function () {
-    const fmtSel = document.createElement('select');
-    fmtSel.id = 'format-select';
-    fmtSel.className = 'chip';
-    fmtSel.setAttribute('aria-label', 'Event timestamp format');
-    supportedFormats.forEach((f) => {
-      const o = document.createElement('option');
-      o.value = f.value;
-      o.textContent = f.label;
-      fmtSel.appendChild(o);
+  function initializePreferences() {
+    const formatSelect = $('#format-select');
+    const timezoneSelect = $('#timezone-select');
+    const relativeSelect = $('#relative-select');
+    const browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    const zones = typeof Intl.supportedValuesOf === 'function'
+      ? ['UTC', browserZone, ...Intl.supportedValuesOf('timeZone')]
+      : ['UTC', browserZone, 'America/Los_Angeles', 'America/New_York', 'Europe/London', 'Europe/Paris', 'Asia/Tokyo', 'Australia/Sydney'];
+    [...new Set(zones)].forEach((zone) => {
+      const option = document.createElement('option');
+      option.value = zone;
+      option.textContent = zone;
+      timezoneSelect.appendChild(option);
     });
-    fmtSel.addEventListener('change', () => {
-      try { localStorage.setItem(FORMAT_KEY, fmtSel.value); } catch (_) {}
-      applyFormat();
-    });
-
-    const relSel = document.createElement('select');
-    relSel.id = 'relative-select';
-    relSel.className = 'chip';
-    relSel.setAttribute('aria-label', 'Relative time style');
-    supportedRelative.forEach((f) => {
-      const o = document.createElement('option');
-      o.value = f.value;
-      o.textContent = f.label;
-      relSel.appendChild(o);
-    });
-    relSel.addEventListener('change', () => {
-      try { localStorage.setItem(RELATIVE_KEY, relSel.value); } catch (_) {}
-      applyFormat();
-    });
-
-    const wrap = document.createElement('span');
-    wrap.className = 'format-control';
-    wrap.setAttribute('aria-label', 'Display format controls');
-    wrap.innerHTML = '<span class="muted">Time:</span>';
-    wrap.appendChild(fmtSel);
-    wrap.innerHTML += ' <span class="muted">Ago:</span>';
-    wrap.appendChild(relSel);
-
-    const topRight = document.getElementById('top-right');
-    topRight.insertBefore(wrap, topRight.firstChild);
+    const getPreference = (key) => { try { return localStorage.getItem(key); } catch (_) { return null; } };
+    const savePreference = (key, value) => { try { localStorage.setItem(key, value); } catch (_) { /* preferences still work until reload */ } };
+    const savedFormat = getPreference(FORMAT_KEY);
+    if ([...formatSelect.options].some((option) => option.value === savedFormat)) formatSelect.value = savedFormat;
+    const savedZone = getPreference(TIMEZONE_KEY) || browserZone;
+    if (![...timezoneSelect.options].some((option) => option.value === savedZone)) {
+      const option = document.createElement('option');
+      option.value = savedZone;
+      option.textContent = savedZone;
+      timezoneSelect.appendChild(option);
+    }
+    timezoneSelect.value = savedZone;
+    const savedRelative = getPreference(RELATIVE_KEY) || DEFAULT_RELATIVE_FORMAT;
+    if ([...relativeSelect.options].some((option) => option.value === savedRelative)) relativeSelect.value = savedRelative;
+    formatSelect.addEventListener('change', () => { savePreference(FORMAT_KEY, formatSelect.value); applyFormat(); });
+    timezoneSelect.addEventListener('change', () => { savePreference(TIMEZONE_KEY, timezoneSelect.value); applyFormat(); });
+    relativeSelect.addEventListener('change', () => { savePreference(RELATIVE_KEY, relativeSelect.value); applyFormat(); });
     applyFormat();
-  })();
+  }
+  initializePreferences();
 
   function renderStats(s) {
     $('#stat-conn24').textContent = s.connections_24h.toLocaleString();
@@ -795,13 +775,14 @@
         <td class="mono muted">${esc(e.username) || '-'}</td>
         <td class="mono muted">${esc(e.detail) || '-'}</td>
         <td class="mono dimmed">${esc(e.client_version) || '-'}</td>
-      </tr>`).join('') : '<tr class="empty-row"><td colspan="7">No attempts recorded yet - the honeypot is listening.</td></tr>';
+        ${CAN_DELETE ? `<td><button class="chip ev-del" data-id="${esc(e.id)}" type="button">Delete</button></td>` : ''}
+      </tr>`).join('') : `<tr class="empty-row"><td colspan="${RECENT_COLSPAN}">No attempts recorded yet - the honeypot is listening.</td></tr>`;
   }
 
   function renderFeed(rows) {
     $('#feed-list').innerHTML = rows.length ? rows.map((r) => `
       <li>
-        <span class="ip">${esc(r.ip)}</span>
+        <span class="ip">${esc(r.ip)}${CAN_DELETE ? ` <button class="chip ev-del" data-ip="${esc(r.ip)}" type="button">Del</button>` : ''}</span>
         <span class="meta">${r.connections} conn · ${r.auth_attempts} auth · last ${esc(fmtTs(r.last_seen))}</span>
       </li>`).join('') : '<li class="empty">No source IPs recorded yet.</li>';
   }
@@ -827,19 +808,15 @@
   }
 
   function tickClock() {
-    $('#utc-clock').textContent = new Date().toISOString().slice(11, 19) + ' UTC';
+    $('#utc-clock').textContent = fmtTs(new Date().toISOString());
   }
 
-  // ---- Admin deletion UI ----
-  const ADMIN_USER = {{ (WEB_ADMIN_USER if WEB_ADMIN_USER else '') | tojson }};
-  const ADMIN_PASS = {{ (WEB_ADMIN_PASS if WEB_ADMIN_PASS else '') | tojson }};
+  const generatedAt = $('#generated-at');
+  if (generatedAt) generatedAt.textContent = fmtTs(generatedAt.dataset.ts);
 
+  // ---- Admin deletion UI ----
   async function adminFetch(path, init = {}) {
-    const headers = new Headers(init.headers || {});
-    if (ADMIN_USER && ADMIN_PASS) {
-      headers.set('Authorization', 'Basic ' + btoa(ADMIN_USER + ':' + ADMIN_PASS));
-    }
-    const res = await fetch(path, { ...init, headers });
+    const res = await fetch(path, { ...init, credentials: 'same-origin' });
     if (res.status === 401) {
       // Credentials not configured or wrong; surface a clear message.
       throw new Error('not authorized');
@@ -869,6 +846,7 @@
   }
 
   async function deleteEvent(id) {
+    if (!window.confirm('Delete this event record? This cannot be undone.')) return;
     const btn = document.querySelector(`.ev-del[data-id="${id}"]`);
     if (!btn) return;
     delButtonState(btn, 'loading');
@@ -883,6 +861,7 @@
   }
 
   async function deleteIp(ip) {
+    if (!window.confirm(`Delete every event recorded for ${ip}? This cannot be undone.`)) return;
     const btns = document.querySelectorAll(`.ev-del[data-ip="${CSS.escape(ip)}"]`);
     btns.forEach((b) => delButtonState(b, 'loading'));
     try {
@@ -924,6 +903,18 @@
 
   const purgeBtn = $('#purge-now');
   if (purgeBtn) purgeBtn.addEventListener('click', purgeNow);
+  const purgeAllBtn = $('#purge-all');
+  if (purgeAllBtn) purgeAllBtn.addEventListener('click', async () => {
+    if (!window.confirm('Delete every recorded event? This cannot be undone.')) return;
+    purgeAllBtn.disabled = true;
+    try {
+      await adminFetch('/api/events/all', { method: 'DELETE' });
+      await refresh();
+    } catch (_) {
+      purgeAllBtn.disabled = false;
+      window.alert('Could not delete records. Please sign in again and retry.');
+    }
+  });
 
   $('#copy-ips').addEventListener('click', async () => {
     try {

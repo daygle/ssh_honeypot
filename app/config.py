@@ -75,7 +75,7 @@ RETENTION_HOURS = _int("RETENTION_HOURS", 0)
 # Dashboard display preferences ------------------------------------------------
 # Jinja date/time format used for event timestamps, feed timestamps and the
 # generated-at footer line. Defaults to the existing UTC space-separated form.
-DATE_FORMAT = os.environ.get("DATE_FORMAT", "%Y-%m-%d %H:%M:%S UTC")
+DATE_FORMAT = os.environ.get("DATE_FORMAT", "%Y-%m-%d %H:%M:%S %Z")
 # Relative-time style used for "last seen" / hero hints. One of:
 #   "compact"  -> 2h ago / 3d ago
 #   "verbose"  -> 2 hours ago / 3 days ago

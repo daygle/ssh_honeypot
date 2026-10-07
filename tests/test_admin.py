@@ -45,6 +45,24 @@ def _basic_auth(user, pass_):
 
 
 class TestAdminAuthGate:
+    def test_dashboard_prompts_for_login_and_protects_data_routes(self, admin_client):
+        c, user, password = admin_client
+        page = c.get("/")
+        assert page.status_code == 401
+        assert page.headers["www-authenticate"].startswith("Basic realm=")
+        assert "Authentication required" in page.text
+        assert c.get("/api/stats").status_code == 401
+        assert c.get("/api/ips").status_code == 401
+        assert c.get("/ssh-blocklist.txt").status_code == 401
+        assert c.get("/export.csv").status_code == 401
+        assert c.request("DELETE", "/api/events/all").status_code == 401
+
+        authenticated = c.get("/", headers=_basic_auth(user, password))
+        assert authenticated.status_code == 200
+        assert "timezone-select" in authenticated.text
+        assert "format-select" in authenticated.text
+        assert password not in authenticated.text
+
     def test_purge_without_auth_returns_401(self):
         with TestClient(app) as c:
             config.WEB_ADMIN_USER = "u"
@@ -93,6 +111,13 @@ class TestAdminAuthGate:
 
 
 class TestAdminDeleteEvent:
+    def test_delete_all_events(self, admin_client, seed_two_ips):
+        c, user, password = admin_client
+        response = c.request("DELETE", "/api/events/all", headers=_basic_auth(user, password))
+        assert response.status_code == 200
+        assert response.json() == {"ok": True, "deleted": 3}
+        assert db.get_summary()["recent"] == []
+
     def test_delete_event_by_id(self, admin_client, seed_two_ips):
         c, user, pass_ = admin_client
         rows_before = db.get_summary()["recent"]
@@ -205,7 +230,7 @@ class TestDashboardAfterDeletion:
             f"/api/events/{target}",
             headers=_basic_auth(user, pass_),
         )
-        res = c.get("/")
+        res = c.get("/", headers=_basic_auth(user, pass_))
         assert res.status_code == 200
         html = res.text
         # The deleted event's id shouldn't appear in a data-id attribute.

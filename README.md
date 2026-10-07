@@ -125,5 +125,23 @@ Environment variables (set under `environment:` in `docker-compose.yml`):
 | `DATA_DIR` | `/data` in Docker, `./data` otherwise | Where SQLite + host key are stored |
 | `DB_PATH` | `$DATA_DIR/honeypot.db` | SQLite database file |
 | `HOST_KEY_PATH` | `$DATA_DIR/host_key` | Decoy SSH host key (generated on first start) |
+| `WEB_ADMIN_USER` | unset | Enables dashboard login and authenticated record deletion/purge |
+| `WEB_ADMIN_PASS` | unset | Password for the dashboard account; use a long, unique password |
+| `RETENTION_HOURS` | `0` | Automatically remove events older than this many hours; `0` disables it |
+| `DATE_FORMAT` | `%Y-%m-%d %H:%M:%S %Z` | Default date/time display format |
+| `RELATIVE_FORMAT` | `compact` | Default relative-time style: `compact` or `verbose` |
+
+For Docker Compose, provide `WEB_ADMIN_USER`, `WEB_ADMIN_PASS`, and optional
+`RETENTION_HOURS` in the environment before `docker compose up -d`.
+
+When `WEB_ADMIN_USER` and `WEB_ADMIN_PASS` are both set, the dashboard, stats,
+IP feed, and CSV export require the same HTTP Basic login; the browser prompts
+for the configured credentials. Individual events, all events for an IP, and
+the complete event history can then be deleted from the dashboard. Keep the
+site behind HTTPS when exposing it beyond a trusted network. With either admin
+credential unset, the dashboard stays public and destructive admin endpoints
+remain disabled. Date/time format, timezone, and relative-time selections are
+saved in that browser's local storage and apply to dashboard displays only;
+stored timestamps and CSV exports remain UTC.
 
 Captured usernames and banners are capped at 512 characters, and CSV exports prefix cells that would be evaluated as spreadsheet formulas with `'`.

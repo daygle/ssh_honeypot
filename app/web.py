@@ -70,11 +70,37 @@ def admin_auth(request: Request) -> bool:
         return False
     import base64
     try:
-        decoded = base64.b64decode(auth.split(" ", 1)[1]).decode("utf-8")
+        decoded = base64.b64decode(auth.split(" ", 1)[1], validate=True).decode("utf-8")
         user, sep, password = decoded.partition(":")
     except Exception:
         return False
-    return user == config.WEB_ADMIN_USER and password == config.WEB_ADMIN_PASS
+    user_ok = secrets.compare_digest(user.encode("utf-8"), config.WEB_ADMIN_USER.encode("utf-8"))
+    pass_ok = secrets.compare_digest(password.encode("utf-8"), config.WEB_ADMIN_PASS.encode("utf-8"))
+    return user_ok and pass_ok
+
+
+def dashboard_auth_error() -> HTMLResponse:
+    """Challenge the browser for configured dashboard credentials."""
+    return HTMLResponse(
+        "<h1>Authentication required</h1><p>Sign in with the configured dashboard account.</p>",
+        status_code=401,
+        headers={"WWW-Authenticate": 'Basic realm="Daygle Dashboard", charset="UTF-8"'},
+    )
+
+
+def api_auth_error() -> Response:
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        status_code=401,
+        content={"detail": "dashboard authentication required"},
+        headers={"WWW-Authenticate": 'Basic realm="Daygle Dashboard", charset="UTF-8"'},
+    )
+
+
+def dashboard_requires_auth(request: Request) -> bool:
+    """Configured deployments protect dashboard data; empty credentials keep public mode."""
+    return admin_enabled() and not admin_auth(request)
+
 
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
@@ -136,7 +162,9 @@ async def security_headers(request: Request, call_next: Callable[[Request], Awai
 
 
 @app.get("/", response_class=HTMLResponse)
-def dashboard() -> HTMLResponse:
+def dashboard(request: Request) -> HTMLResponse:
+    if dashboard_requires_auth(request):
+        return dashboard_auth_error()
     nonce = secrets.token_urlsafe(16)
     stats = db.get_summary()
     retention = {
@@ -152,24 +180,28 @@ def dashboard() -> HTMLResponse:
         date_format=config.DATE_FORMAT,
         relative_format=config.RELATIVE_FORMAT,
         retention=retention,
-        web_admin_user=config.WEB_ADMIN_USER or "",
-        web_admin_pass=config.WEB_ADMIN_PASS or "",
     )
     return HTMLResponse(html, headers={"Content-Security-Policy": CSP_TEMPLATE.format(nonce=nonce)})
 
 
 @app.get("/api/stats")
-def api_stats() -> dict[str, Any]:
+def api_stats(request: Request) -> Any:
+    if dashboard_requires_auth(request):
+        return api_auth_error()
     return db.get_summary()
 
 
 @app.get("/api/ips")
-def api_ips() -> list[dict[str, Any]]:
+def api_ips(request: Request) -> Any:
+    if dashboard_requires_auth(request):
+        return api_auth_error()
     return db.get_ip_rows()
 
 
 @app.get("/ssh-blocklist.txt")
-def blocklist() -> PlainTextResponse:
+def blocklist(request: Request) -> Any:
+    if dashboard_requires_auth(request):
+        return api_auth_error()
     return PlainTextResponse(db.blocklist_text())
 
 
@@ -213,6 +245,21 @@ def admin_purge(request: Request) -> dict[str, Any]:
     }
 
 
+@app.delete("/api/events/all")
+def admin_delete_all_events(request: Request) -> Any:
+    """Admin-only deletion of the entire event history."""
+    if not admin_enabled():
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=404, content={"detail": "admin endpoints disabled"})
+    if not admin_auth(request):
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=401, content={"detail": "admin auth required"})
+    with db._connect() as conn:
+        cur = conn.execute("DELETE FROM events")
+        deleted = int(cur.rowcount)
+    return {"ok": True, "deleted": deleted}
+
+
 @app.delete("/api/events/{event_id:int}")
 def admin_delete_event(request: Request, event_id: int) -> dict[str, Any]:
     """Admin-only delete of a single event by id."""
@@ -230,7 +277,9 @@ def admin_delete_event(request: Request, event_id: int) -> dict[str, Any]:
 
 
 @app.get("/export.csv")
-def export_csv() -> StreamingResponse:
+def export_csv(request: Request) -> Any:
+    if dashboard_requires_auth(request):
+        return api_auth_error()
     return StreamingResponse(
         db.iter_events_csv(),
         media_type="text/csv",
