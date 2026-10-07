@@ -15,4 +15,6 @@ def fresh_db():
     db.init_db()
     with db._connect() as conn:
         conn.execute("DELETE FROM events")
+        conn.execute("DELETE FROM app_settings")
+        conn.execute("INSERT INTO app_settings (key, value) VALUES ('admin_setup', 'complete')")
     yield

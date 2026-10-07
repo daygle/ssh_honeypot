@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import io
+import secrets
 import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
@@ -26,6 +27,10 @@ CREATE TABLE IF NOT EXISTS events (
     username TEXT,
     detail TEXT,
     client_version TEXT
+);
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
 );
 -- Superseded by the covering indexes below.
 DROP INDEX IF EXISTS idx_events_ip;
@@ -83,8 +88,90 @@ def _connect() -> sqlite3.Connection:
 
 
 def init_db() -> None:
-    with _connect() as conn:
-        conn.executescript(SCHEMA)
+    conn = _connect()
+    tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    legacy_install = "events" in tables and "app_settings" not in tables
+    with conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        conn.execute(
+            "INSERT OR IGNORE INTO app_settings (key, value) VALUES ('admin_setup', ?)",
+            ("complete" if legacy_install else "required",),
+        )
+        state = conn.execute(
+            "SELECT value FROM app_settings WHERE key = 'admin_setup'"
+        ).fetchone()
+        if state and state["value"] == "required":
+            conn.execute(
+                "INSERT OR IGNORE INTO app_settings (key, value) VALUES ('setup_token', ?)",
+                (secrets.token_urlsafe(32),),
+            )
+        else:
+            conn.execute("DELETE FROM app_settings WHERE key = 'setup_token'")
+    conn.executescript(SCHEMA)
+
+
+def admin_setup_required() -> bool:
+    row = _connect().execute("SELECT value FROM app_settings WHERE key = 'admin_setup'").fetchone()
+    return bool(row and row["value"] == "required")
+
+
+def admin_credentials() -> dict[str, str] | None:
+    rows = {
+        row["key"]: row["value"]
+        for row in _connect().execute(
+            "SELECT key, value FROM app_settings "
+            "WHERE key IN ('admin_username', 'admin_salt', 'admin_password_hash')"
+        )
+    }
+    if not {"admin_username", "admin_salt", "admin_password_hash"} <= rows.keys():
+        return None
+    return {
+        "username": rows["admin_username"],
+        "salt": rows["admin_salt"],
+        "password_hash": rows["admin_password_hash"],
+    }
+
+
+def setup_token() -> str | None:
+    row = _connect().execute("SELECT value FROM app_settings WHERE key = 'setup_token'").fetchone()
+    return row["value"] if row and row["value"] else None
+
+
+def complete_admin_setup(username: str, salt: str, password_hash: str, token: str) -> bool:
+    """Store the initial admin account once; concurrent setup requests cannot replace it."""
+    conn = _connect()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        state = conn.execute(
+            "SELECT value FROM app_settings WHERE key = 'admin_setup'"
+        ).fetchone()
+        stored_token = conn.execute(
+            "SELECT value FROM app_settings WHERE key = 'setup_token'"
+        ).fetchone()
+        if (
+            not state
+            or state["value"] != "required"
+            or not stored_token
+            or not secrets.compare_digest(stored_token["value"], token)
+        ):
+            conn.rollback()
+            return False
+        conn.executemany(
+            "INSERT INTO app_settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            [
+                ("admin_username", username),
+                ("admin_salt", salt),
+                ("admin_password_hash", password_hash),
+                ("admin_setup", "complete"),
+                ("setup_token", ""),
+            ],
+        )
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def _fmt(dt: datetime) -> str:

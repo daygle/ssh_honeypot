@@ -71,8 +71,8 @@ that is already built, so it keeps running the old code - and after a
 `docker compose build` picks up a new Dockerfile, changed app code or new pins.
 
 Recorded events live in the `daygle-data` volume and survive the recreate.
-Nothing in the project runs schema migrations; `init_db` only issues
-`CREATE TABLE IF NOT EXISTS`, so an update never needs a migration step.
+Database startup creates any missing settings tables without changing existing
+event records.
 
 Confirm the new version actually came up:
 
@@ -97,7 +97,8 @@ docker compose build && docker compose up -d
 
 1. Move real sshd to 2222 and verify a login on the new port from a second terminal.
 2. On the Debian 13 host, run `docker compose up -d --build` as your normal user.
-3. Open `http://your-server:8080` for the dashboard, or `http://your-server:8080/ssh-blocklist.txt` for the IP list.
+3. On the first run, copy the complete one-time setup URL printed in the app logs and open it from a trusted network; the URL contains the secret setup key. Create the admin account there before using the dashboard. Use HTTPS if accessing the setup page remotely.
+4. After setup, sign in at `http://your-server:8080`; for the IP list use `http://your-server:8080/ssh-blocklist.txt`.
 
 ## Development
 
@@ -131,16 +132,20 @@ Environment variables (set under `environment:` in `docker-compose.yml`):
 | `DATE_FORMAT` | `%Y-%m-%d %H:%M:%S %Z` | Default date/time display format |
 | `RELATIVE_FORMAT` | `compact` | Default relative-time style: `compact` or `verbose` |
 
-For Docker Compose, provide `WEB_ADMIN_USER`, `WEB_ADMIN_PASS`, and optional
-`RETENTION_HOURS` in the environment before `docker compose up -d`.
+On a fresh install, open the first-run setup link printed in the app logs and
+create the admin username and password in its one-time setup form. Passwords
+are stored as salted PBKDF2 hashes. Keep the initial setup link private and use
+HTTPS or a trusted private network while creating the account. Databases from
+before this setup feature keep their current access settings. For Docker
+Compose, you can alternatively provide
+`WEB_ADMIN_USER`, `WEB_ADMIN_PASS`, and optional `RETENTION_HOURS` in the
+environment before `docker compose up -d`; configured credentials skip setup.
 
-When `WEB_ADMIN_USER` and `WEB_ADMIN_PASS` are both set, the dashboard, stats,
-IP feed, and CSV export require the same HTTP Basic login; the browser prompts
-for the configured credentials. Individual events, all events for an IP, and
-the complete event history can then be deleted from the dashboard. Keep the
-site behind HTTPS when exposing it beyond a trusted network. With either admin
-credential unset, the dashboard stays public and destructive admin endpoints
-remain disabled. Date/time format, timezone, and relative-time selections are
+After setup, the dashboard, stats, IP feed, and CSV export require the same
+HTTP Basic login; the browser prompts for the configured credentials.
+Individual events, all events for an IP, and the complete event history can
+then be deleted from the dashboard. Keep the site behind HTTPS when exposing
+it beyond a trusted network. Date/time format, timezone, and relative-time selections are
 saved in that browser's local storage and apply to dashboard displays only;
 stored timestamps and CSV exports remain UTC.
 

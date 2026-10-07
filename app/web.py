@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncIterator, Awaitable, Callable
+from urllib.parse import parse_qs, urlencode
 
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import HTMLResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, StreamingResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from datetime import datetime, timezone
 
@@ -52,9 +55,37 @@ templates.filters["datefmt"] = _jinja_datefmt
 templates.filters["title"] = _jinja_title
 
 
+PASSWORD_HASH_ITERATIONS = 310_000
+
+
 def admin_enabled() -> bool:
-    """True when admin credentials are configured (endpoints are live)."""
-    return bool(config.WEB_ADMIN_USER and config.WEB_ADMIN_PASS)
+    """True when environment or first-run admin credentials are configured."""
+    return bool(
+        (config.WEB_ADMIN_USER and config.WEB_ADMIN_PASS)
+        or db.admin_credentials()
+    )
+
+
+def setup_required() -> bool:
+    """Fresh databases with no environment-provided admin require initial setup."""
+    if config.WEB_ADMIN_USER and config.WEB_ADMIN_PASS:
+        return False
+    return db.admin_setup_required()
+
+
+def _admin_credentials() -> tuple[str, str, str | None] | None:
+    if config.WEB_ADMIN_USER and config.WEB_ADMIN_PASS:
+        return config.WEB_ADMIN_USER, config.WEB_ADMIN_PASS, None
+    stored = db.admin_credentials()
+    if not stored:
+        return None
+    return stored["username"], stored["password_hash"], stored["salt"]
+
+
+def _password_hash(password: str, salt: bytes) -> str:
+    return hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), salt, PASSWORD_HASH_ITERATIONS
+    ).hex()
 
 
 def admin_auth(request: Request) -> bool:
@@ -63,7 +94,8 @@ def admin_auth(request: Request) -> bool:
     Requires ``admin_enabled()`` to be True; otherwise the caller should treat
     the endpoint as disabled (404).
     """
-    if not admin_enabled():
+    credentials = _admin_credentials()
+    if not credentials:
         return False
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Basic "):
@@ -74,15 +106,20 @@ def admin_auth(request: Request) -> bool:
         user, sep, password = decoded.partition(":")
     except Exception:
         return False
-    user_ok = secrets.compare_digest(user.encode("utf-8"), config.WEB_ADMIN_USER.encode("utf-8"))
-    pass_ok = secrets.compare_digest(password.encode("utf-8"), config.WEB_ADMIN_PASS.encode("utf-8"))
+    expected_user, expected_password, salt = credentials
+    user_ok = secrets.compare_digest(user.encode("utf-8"), expected_user.encode("utf-8"))
+    if salt is None:
+        pass_ok = secrets.compare_digest(password.encode("utf-8"), expected_password.encode("utf-8"))
+    else:
+        candidate = _password_hash(password, bytes.fromhex(salt))
+        pass_ok = hmac.compare_digest(candidate, expected_password)
     return user_ok and pass_ok
 
 
 def dashboard_auth_error() -> HTMLResponse:
     """Challenge the browser for configured dashboard credentials."""
     return HTMLResponse(
-        "<h1>Authentication required</h1><p>Sign in with the configured dashboard account.</p>",
+        "<h1>Authentication required</h1><p>Sign in with your dashboard admin account.</p>",
         status_code=401,
         headers={"WWW-Authenticate": 'Basic realm="Daygle Dashboard", charset="UTF-8"'},
     )
@@ -98,8 +135,16 @@ def api_auth_error() -> Response:
 
 
 def dashboard_requires_auth(request: Request) -> bool:
-    """Configured deployments protect dashboard data; empty credentials keep public mode."""
+    """Configured deployments protect dashboard data; empty legacy installs remain public."""
     return admin_enabled() and not admin_auth(request)
+
+
+def setup_response() -> RedirectResponse:
+    token = db.setup_token()
+    location = "/setup"
+    if token:
+        location += "?" + urlencode({"key": token})
+    return RedirectResponse(location, status_code=303, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
 
 
 SECURITY_HEADERS = {
@@ -129,6 +174,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     db.init_db()
+    if setup_required():
+        host = config.WEB_HOST if config.WEB_HOST not in {"0.0.0.0", "::", ""} else "<dashboard-host>"
+        log.warning(
+            "Initial admin setup required. Open http://%s:%s/setup?key=%s "
+            "from a trusted network and keep the link private.",
+            host,
+            config.WEB_PORT,
+            db.setup_token(),
+        )
     acceptor = None
     try:
         acceptor = await honeypot.start()
@@ -161,8 +215,69 @@ async def security_headers(request: Request, call_next: Callable[[Request], Awai
     return response
 
 
+def valid_setup_token(request: Request) -> bool:
+    expected = db.setup_token()
+    supplied = request.query_params.get("key", "")
+    return bool(expected and supplied and secrets.compare_digest(expected, supplied))
+
+
+@app.get("/setup", response_class=HTMLResponse)
+def setup_page(request: Request) -> Any:
+    if not setup_required():
+        return RedirectResponse("/", status_code=303)
+    if not valid_setup_token(request):
+        headers = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
+        return HTMLResponse("This installation requires its first-run setup link.", status_code=404, headers=headers)
+    return HTMLResponse(
+        templates.get_template("setup.html").render(error=None, setup_key=db.setup_token()),
+        headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"},
+    )
+
+
+@app.post("/setup", response_class=HTMLResponse)
+async def setup_admin(request: Request) -> Any:
+    if not setup_required():
+        return HTMLResponse("Setup has already been completed.", status_code=409, headers={"Cache-Control": "no-store"})
+    if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != "application/x-www-form-urlencoded":
+        return HTMLResponse("Invalid setup form.", status_code=415, headers={"Cache-Control": "no-store"})
+    body = await request.body()
+    if len(body) > 4096:
+        return HTMLResponse("Setup form is too large.", status_code=413, headers={"Cache-Control": "no-store"})
+    values = parse_qs(body.decode("utf-8", errors="replace"), keep_blank_values=True)
+    submitted_token = values.get("setup_key", [""])[0]
+    expected_token = db.setup_token()
+    if not expected_token or not secrets.compare_digest(expected_token, submitted_token):
+        return HTMLResponse("This setup link is invalid or has expired.", status_code=404, headers={"Cache-Control": "no-store"})
+    username = values.get("username", [""])[0].strip()
+    password = values.get("password", [""])[0]
+    confirmation = values.get("password_confirm", [""])[0]
+    error = None
+    if not username or len(username) > 64 or ":" in username or any(ord(char) < 32 for char in username):
+        error = "Choose a username between 1 and 64 characters."
+    elif len(password) < 12:
+        error = "Choose a password with at least 12 characters."
+    elif len(password) > 1024:
+        error = "Password must be 1024 characters or fewer."
+    elif password != confirmation:
+        error = "The password confirmation does not match."
+    if error:
+        return HTMLResponse(
+            templates.get_template("setup.html").render(error=error, setup_key=expected_token),
+            status_code=400,
+            headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"},
+        )
+
+    salt = secrets.token_bytes(16)
+    password_hash = _password_hash(password, salt)
+    if not db.complete_admin_setup(username, salt.hex(), password_hash, expected_token):
+        return HTMLResponse("Setup has already been completed.", status_code=409, headers={"Cache-Control": "no-store"})
+    return RedirectResponse("/", status_code=303, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+
+
 @app.get("/", response_class=HTMLResponse)
-def dashboard(request: Request) -> HTMLResponse:
+def dashboard(request: Request) -> Any:
+    if setup_required():
+        return setup_response()
     if dashboard_requires_auth(request):
         return dashboard_auth_error()
     nonce = secrets.token_urlsafe(16)
@@ -171,7 +286,7 @@ def dashboard(request: Request) -> HTMLResponse:
         "enabled": config.RETENTION_HOURS > 0,
         "hours": config.RETENTION_HOURS,
         "older_than": db.count_events_older_than(config.RETENTION_HOURS) if config.RETENTION_HOURS > 0 else 0,
-        "admin_enabled": bool(config.WEB_ADMIN_USER and config.WEB_ADMIN_PASS),
+        "admin_enabled": admin_enabled(),
     }
     html = templates.get_template("dashboard.html").render(
         stats=stats,
@@ -186,6 +301,8 @@ def dashboard(request: Request) -> HTMLResponse:
 
 @app.get("/api/stats")
 def api_stats(request: Request) -> Any:
+    if setup_required():
+        return setup_response()
     if dashboard_requires_auth(request):
         return api_auth_error()
     return db.get_summary()
@@ -193,6 +310,8 @@ def api_stats(request: Request) -> Any:
 
 @app.get("/api/ips")
 def api_ips(request: Request) -> Any:
+    if setup_required():
+        return setup_response()
     if dashboard_requires_auth(request):
         return api_auth_error()
     return db.get_ip_rows()
@@ -200,13 +319,15 @@ def api_ips(request: Request) -> Any:
 
 @app.get("/ssh-blocklist.txt")
 def blocklist(request: Request) -> Any:
+    if setup_required():
+        return setup_response()
     if dashboard_requires_auth(request):
         return api_auth_error()
     return PlainTextResponse(db.blocklist_text())
 
 
 @app.delete("/api/events")
-def admin_purge(request: Request) -> dict[str, Any]:
+def admin_purge(request: Request) -> Any:
     """Admin-only purge: delete events older than N hours and/or for specific IPs.
 
     Query params:
@@ -261,7 +382,7 @@ def admin_delete_all_events(request: Request) -> Any:
 
 
 @app.delete("/api/events/{event_id:int}")
-def admin_delete_event(request: Request, event_id: int) -> dict[str, Any]:
+def admin_delete_event(request: Request, event_id: int) -> Any:
     """Admin-only delete of a single event by id."""
     if not admin_enabled():
         from fastapi.responses import JSONResponse
@@ -278,6 +399,8 @@ def admin_delete_event(request: Request, event_id: int) -> dict[str, Any]:
 
 @app.get("/export.csv")
 def export_csv(request: Request) -> Any:
+    if setup_required():
+        return setup_response()
     if dashboard_requires_auth(request):
         return api_auth_error()
     return StreamingResponse(

@@ -6,6 +6,20 @@ from app.web import app
 
 
 @pytest.fixture()
+def fresh_setup():
+    with db._connect() as conn:
+        conn.execute("DELETE FROM app_settings")
+        conn.executemany(
+            "INSERT INTO app_settings (key, value) VALUES (?, ?)",
+            [("admin_setup", "required"), ("setup_token", "test-setup-key")],
+        )
+    yield
+    with db._connect() as conn:
+        conn.execute("DELETE FROM app_settings")
+        conn.execute("INSERT INTO app_settings (key, value) VALUES ('admin_setup', 'complete')")
+
+
+@pytest.fixture()
 def admin_client():
     # Enable admin creds for the duration of this fixture.
     admin_user = "admin"
@@ -20,6 +34,7 @@ def admin_client():
     finally:
         config.WEB_ADMIN_USER = real_user
         config.WEB_ADMIN_PASS = real_pass
+
 
 
 @pytest.fixture()
@@ -42,6 +57,82 @@ def seed_two_ips():
 def _basic_auth(user, pass_):
     import base64
     return {"Authorization": "Basic " + base64.b64encode(f"{user}:{pass_}".encode()).decode()}
+
+
+class TestFirstRunAdminSetup:
+    def test_fresh_install_routes_to_setup_and_creates_persisted_admin(self, fresh_setup):
+        config.WEB_ADMIN_USER = ""
+        config.WEB_ADMIN_PASS = ""
+        with TestClient(app) as c:
+            setup = c.get("/", follow_redirects=False)
+            assert setup.status_code == 303
+            assert setup.headers["location"] == "/setup?key=test-setup-key"
+            assert c.get("/setup").status_code == 404
+            page = c.get("/setup?key=test-setup-key")
+            assert page.status_code == 200
+            assert page.headers["cache-control"] == "no-store"
+            assert "Create admin account" in page.text
+            missing_key = c.post("/setup", data={
+                "username": "owner",
+                "password": "a-long-first-run-password",
+                "password_confirm": "a-long-first-run-password",
+            })
+            assert missing_key.status_code == 404
+            assert db.admin_setup_required()
+
+            invalid = c.post("/setup", data={
+                "username": "owner",
+                "password": "short",
+                "password_confirm": "short",
+                "setup_key": "test-setup-key",
+            })
+            assert invalid.status_code == 400
+            assert "at least 12 characters" in invalid.text
+            assert db.admin_setup_required()
+
+            password = "a-long-first-run-password"
+            created = c.post("/setup", data={
+                "username": "owner",
+                "password": password,
+                "password_confirm": password,
+                "setup_key": "test-setup-key",
+            }, follow_redirects=False)
+            assert created.status_code == 303
+            assert created.headers["location"] == "/"
+            assert not db.admin_setup_required()
+            stored = db.admin_credentials()
+            assert stored["username"] == "owner"
+            assert stored["password_hash"] != password
+            assert password not in str(stored)
+
+            assert c.get("/", follow_redirects=False).status_code == 401
+            assert c.get("/api/stats").status_code == 401
+            assert c.get("/api/stats", auth=("owner", password)).status_code == 200
+            assert c.get("/", auth=("owner", password)).status_code == 200
+            event_id = db.record_event("connect", "203.0.113.10")
+            deleted = c.delete(f"/api/events/{event_id}", auth=("owner", password))
+            assert deleted.status_code == 200
+            assert db.get_summary()["recent"] == []
+            assert c.get("/setup?key=test-setup-key", follow_redirects=False).status_code == 303
+            assert c.post("/setup", data={
+                "username": "attacker",
+                "password": password,
+                "password_confirm": password,
+                "setup_key": "test-setup-key",
+            }).status_code == 409
+            assert db.admin_credentials()["username"] == "owner"
+
+    def test_setup_password_confirmation_required(self, fresh_setup):
+        with TestClient(app) as c:
+            response = c.post("/setup", data={
+                "username": "owner",
+                "password": "a-long-first-run-password",
+                "password_confirm": "a-different-long-password",
+                "setup_key": "test-setup-key",
+            })
+            assert response.status_code == 400
+            assert "confirmation does not match" in response.text
+            assert db.admin_setup_required()
 
 
 class TestAdminAuthGate:

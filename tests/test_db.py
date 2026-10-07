@@ -127,6 +127,16 @@ def test_empty_database_summary():
     assert db.events_csv().strip() == "timestamp_utc,ip,ip_port,event,username,detail,client_version"
 
 
+def test_init_db_marks_existing_events_database_as_legacy_setup_complete():
+    db.init_db()
+    assert not db.admin_setup_required()
+    assert db.setup_token() is None
+    db.record_event("connect", "203.0.113.9")
+    db.init_db()
+    assert len(db.get_summary()["recent"]) == 1
+    assert not db.admin_setup_required()
+
+
 def test_init_db_migrates_legacy_indexes():
     with db._connect() as conn:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_events_ip ON events (ip)")

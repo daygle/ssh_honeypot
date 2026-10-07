@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Initial Setup · Daygle SSH Honeypot</title>
+<style>
+  :root { color-scheme: dark; --bg: #070b12; --panel: #101b2b; --line: #24354b; --text: #e6eef8; --muted: #9aabc0; --sky: #4cc2ff; --emerald: #2fd693; --rose: #ff8294; }
+  * { box-sizing: border-box; }
+  body { min-height: 100vh; margin: 0; display: grid; place-items: center; padding: 1.25rem; color: var(--text); background: radial-gradient(800px 500px at 85% 0%, #102339, transparent 65%), var(--bg); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { width: min(100%, 480px); padding: clamp(1.5rem, 6vw, 2.5rem); background: linear-gradient(160deg, #122035, var(--panel)); border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 24px 80px #0007; }
+  .eyebrow { color: var(--sky); font-size: .76rem; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; }
+  h1 { margin: .8rem 0 .5rem; font-size: clamp(1.8rem, 7vw, 2.35rem); line-height: 1.08; letter-spacing: -.035em; }
+  p { color: var(--muted); margin: 0 0 1.5rem; }
+  label { display: block; margin: 1rem 0 .4rem; color: var(--text); font-size: .88rem; font-weight: 600; }
+  input { width: 100%; padding: .8rem .9rem; color: var(--text); background: #080f1a; border: 1px solid var(--line); border-radius: 9px; font: inherit; }
+  input:focus { outline: 2px solid var(--sky); outline-offset: 2px; }
+  .help { margin: .4rem 0 0; font-size: .78rem; }
+  .error { margin: 0 0 1rem; padding: .75rem .85rem; color: var(--rose); background: #ff829414; border: 1px solid #ff829455; border-radius: 9px; }
+  button { width: 100%; margin-top: 1.5rem; padding: .85rem 1rem; color: #04121d; background: var(--emerald); border: 0; border-radius: 9px; font: inherit; font-weight: 700; cursor: pointer; }
+  button:hover { filter: brightness(1.08); }
+  .secure { margin: 1rem 0 0; text-align: center; font-size: .77rem; }
+</style>
+</head>
+<body>
+<main>
+  <span class="eyebrow">Daygle · First run</span>
+  <h1>Set up your admin account</h1>
+  <p>Create the username and password used to sign in and manage captured records. This setup is available only once for a new installation.</p>
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  <form method="post" action="/setup" autocomplete="on">
+    <input type="hidden" name="setup_key" value="{{ setup_key }}">
+    <label for="username">Admin username</label>
+    <input id="username" name="username" type="text" minlength="1" maxlength="64" required autocomplete="username" autofocus>
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" minlength="12" maxlength="1024" required autocomplete="new-password">
+    <p class="help">Use at least 12 characters. Your password is stored as a salted hash.</p>
+    <label for="password_confirm">Confirm password</label>
+    <input id="password_confirm" name="password_confirm" type="password" minlength="12" maxlength="1024" required autocomplete="new-password">
+    <button type="submit">Create admin account</button>
+  </form>
+  <p class="secure">For remote setup, use HTTPS or a trusted private network.</p>
+</main>
+</body>
+</html>
