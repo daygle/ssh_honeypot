@@ -165,6 +165,7 @@ def complete_admin_setup(username: str, salt: str, password_hash: str, token: st
                 ("admin_password_hash", password_hash),
                 ("admin_setup", "complete"),
                 ("setup_token", ""),
+                ("retention_days", str(DEFAULT_RETENTION_DAYS)),
             ],
         )
         conn.commit()
@@ -370,4 +371,72 @@ def count_events_older_than(hours: int) -> int:
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime(TS_FORMAT)
     row = conn.execute("SELECT COUNT(*) AS c FROM events WHERE ts < ?", (cutoff,)).fetchone()
     return int(row["c"]) if row else 0
+
+
+DEFAULT_RETENTION_DAYS = 30
+
+
+def retention_days() -> int:
+    """Active retention window in days, persisted in app_settings.
+
+    Returns 0 when no GUI retention policy has been configured yet (legacy or
+    unconfigured installs). 0 disables server-side age-based purging.
+    """
+    row = _connect().execute(
+        "SELECT value FROM app_settings WHERE key = 'retention_days'"
+    ).fetchone()
+    if not row or not row["value"]:
+        return 0
+    try:
+        return int(row["value"])
+    except ValueError:
+        return 0
+
+
+def ensure_default_retention_days() -> int:
+    """Idempotently seed the default retention_days row if the row is missing.
+
+    Returns the current retention_days after the call. This exists so the
+    dashboard can guarantee a server-side retention value exists on installs
+    that enabled admin via environment variables without going through first-run
+    setup (where the seed is also written).
+
+    Note: a value of 0 is a real, persisted setting (retention disabled), so we
+    only seed when the row itself is absent --- never overwrite an explicit 0.
+    """
+    conn = _connect()
+    row = conn.execute(
+        "SELECT value FROM app_settings WHERE key = 'retention_days'"
+    ).fetchone()
+    if row and row["value"]:
+        try:
+            return int(row["value"])
+        except ValueError:
+            return 0
+    set_retention_days(DEFAULT_RETENTION_DAYS)
+    return DEFAULT_RETENTION_DAYS
+
+
+def set_retention_days(days: int) -> None:
+    """Persist the GUI retention window in days. 0 disables it."""
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO app_settings (key, value) VALUES ('retention_days', ?)"
+            " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (str(int(days)),),
+        )
+
+
+def count_events_older_than_days(days: int) -> int:
+    """How many events are older than `days` days (for retention UI)."""
+    if days <= 0:
+        return 0
+    return count_events_older_than(days * 24)
+
+
+def delete_events_older_than_days(days: int) -> int:
+    """Delete events older than `days` days. Returns rows removed."""
+    if days <= 0:
+        return 0
+    return delete_events_older_than(days * 24)
 

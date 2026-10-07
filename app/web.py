@@ -282,11 +282,14 @@ def dashboard(request: Request) -> Any:
         return dashboard_auth_error()
     nonce = secrets.token_urlsafe(16)
     stats = db.get_summary()
+    if admin_enabled():
+        db.ensure_default_retention_days()
     retention = {
-        "enabled": config.RETENTION_HOURS > 0,
-        "hours": config.RETENTION_HOURS,
-        "older_than": db.count_events_older_than(config.RETENTION_HOURS) if config.RETENTION_HOURS > 0 else 0,
+        "enabled": db.retention_days() > 0,
+        "days": db.retention_days(),
+        "older_than": db.count_events_older_than_days(db.retention_days()),
         "admin_enabled": admin_enabled(),
+        "hours_legacy": config.RETENTION_HOURS,
     }
     html = templates.get_template("dashboard.html").render(
         stats=stats,
@@ -363,6 +366,75 @@ def admin_purge(request: Request) -> Any:
         "removed_ips": removed_ips,
         "ips": ips,
         "total_removed": removed_older + removed_ips,
+    }
+
+
+@app.get("/api/retention")
+def api_retention(request: Request) -> Any:
+    """Current server-side retention window, persisted in app_settings.
+
+    Returns the active retention_days (0 when not yet configured) and how many
+    events would be removed by a purge to that window. Public only when no admin
+    has been configured; otherwise admin auth is required.
+    """
+    if setup_required():
+        return setup_response()
+    if dashboard_requires_auth(request):
+        return api_auth_error()
+    days = db.retention_days()
+    return {
+        "retention_days": days,
+        "enabled": days > 0,
+        "older_than": db.count_events_older_than_days(days),
+    }
+
+
+@app.put("/api/retention")
+async def admin_update_retention(request: Request) -> Any:
+    """Admin-only update of the GUI retention window, persisted in app_settings.
+
+    Body (JSON): {"retention_days": <int >= 0>}
+
+    retention_days = 0 disables age-based purging. retention_days >= 1 sets the
+    GUI retention window; it does not purge automatically (use /api/events with
+    older_than_hours, or the Purge now button, to remove old events).
+    """
+    if not admin_enabled():
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=404, content={"detail": "admin endpoints disabled"})
+    if not admin_auth(request):
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=401, content={"detail": "admin auth required"})
+
+    if not request.headers.get("content-type", "").split(";", 1)[0].strip().lower() == "application/json":
+        return {"error": "content-type must be application/json"}
+
+    body = await request.body()
+    if len(body) > 4096:
+        return {"error": "request body is too large"}
+    import json
+    try:
+        data = json.loads(body.decode("utf-8", errors="replace"))
+    except ValueError:
+        return {"error": "invalid json"}
+
+    raw = data.get("retention_days") if isinstance(data, dict) else None
+    if raw is None:
+        return {"error": "retention_days is required"}
+    try:
+        days = int(raw)
+    except (TypeError, ValueError):
+        return {"error": "retention_days must be an integer"}
+    if days < 0:
+        return {"error": "retention_days must be >= 0"}
+    if days > 0 and days > 9999:
+        return {"error": "retention_days must be <= 9999"}
+
+    db.set_retention_days(days)
+    return {
+        "retention_days": days,
+        "enabled": days > 0,
+        "older_than": db.count_events_older_than_days(days),
     }
 
 

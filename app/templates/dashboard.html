@@ -86,7 +86,7 @@
   .topnav { display: flex; gap: 1.4rem; margin-left: .5rem; }
   .topnav a { color: var(--muted); text-decoration: none; font-size: .86rem; letter-spacing: .01em; }
   .topnav a:hover { color: var(--text); }
-  .top-right { margin-left: auto; display: flex; align-items: center; gap: .9rem; }
+  .top-right { margin-left: auto; display: flex; align-items: center; gap: .6rem; }
   .clock { color: var(--dim); font-size: .82rem; }
   .pill {
     display: inline-flex; align-items: center; gap: .5rem;
@@ -103,6 +103,67 @@
     70% { box-shadow: 0 0 0 7px rgba(47, 214, 147, 0); }
     100% { box-shadow: 0 0 0 0 rgba(47, 214, 147, 0); }
   }
+
+  /* ---------- settings toggle ---------- */
+  .settings-toggle {
+    display: inline-flex; align-items: center; gap: .45rem;
+    background: rgba(16, 27, 43, .65);
+    border: 1px solid var(--line);
+    color: var(--text);
+    padding: .34rem .5rem .34rem .55rem;
+    border-radius: 9px;
+    cursor: pointer;
+    transition: border-color .15s ease, background .15s ease, transform .12s ease;
+  }
+  .settings-toggle:hover { border-color: rgba(76, 194, 255, .5); background: rgba(16, 27, 43, .9); }
+  .settings-toggle:active { transform: translateY(1px); }
+  .settings-toggle .gear { color: var(--sky); }
+  .settings-toggle .chev { color: var(--muted); transition: transform .2s ease; }
+  .settings-toggle[aria-expanded="true"] .chev { transform: rotate(180deg); }
+
+  .settings-panel {
+    position: absolute; top: calc(100% + .45rem); right: 0;
+    width: 22rem;
+    background: rgba(12, 18, 28, .98);
+    backdrop-filter: blur(14px);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, .45), 0 1px 0 rgba(76, 194, 255, .08) inset;
+    padding: .85rem 1rem;
+    z-index: 50;
+  }
+  .topbar { position: relative; }
+  .topbar .top-right { position: relative; }
+  .settings-row {
+    display: flex; align-items: center; gap: .55rem;
+    padding: .34rem 0;
+  }
+  .settings-row + .settings-row { border-top: 1px solid var(--line-soft); }
+  .settings-row .chip { max-width: 16rem; }
+  .settings-section { padding: .1rem 0; }
+  .settings-section-head {
+    font-size: .66rem; letter-spacing: .14em; color: var(--dim);
+    text-transform: uppercase; padding: .5rem .05rem .32rem;
+  }
+  .settings-section-head + .settings-row { padding-top: 0; }
+  .settings-actions { padding-top: .28rem; padding-bottom: .28rem; }
+  .settings-actions .chip + .chip { margin-left: .5rem; }
+  .settings-reset { margin-top: 0; padding-top: 0; }
+  .settings-reset .chip { font-size: .7rem; padding: .26rem .55rem; opacity: .8; }
+  .settings-reset .chip:hover { opacity: 1; color: var(--rose); border-color: rgba(255, 107, 129, .4); }
+  .retention-input {
+    max-width: 5rem; width: 5rem;
+    font-family: var(--mono); font-size: .76rem;
+    padding: .26rem .45rem; border-radius: 7px;
+    background: rgba(7, 11, 18, .7); border: 1px solid var(--line);
+    color: var(--text); outline: none;
+  }
+  .retention-input:focus { border-color: var(--sky); }
+  .retention-status { padding: .1rem .05rem; min-height: 1.1rem; }
+  .retention-status-msg { font-size: .74rem; color: var(--muted); }
+  .retention-status-msg.ok { color: var(--emerald); }
+  .retention-status-msg.err { color: var(--rose); }
+  .settings-actions.disabled { opacity: .5; pointer-events: none; }
 
   /* ---------- hero ---------- */
   .hero { padding: 4.25rem 0 2.75rem; }
@@ -384,25 +445,57 @@
     </nav>
     <div class="top-right" id="top-right">
       <span class="clock mono" id="utc-clock">--:--:--</span>
-      <span class="format-control" aria-label="Display preferences">
-        <label class="muted" for="format-select">Format</label>
-        <select class="chip" id="format-select" aria-label="Date and time format">
-          <option value="{{ date_format }}">2026-02-15 14:03:22</option>
-          <option value="%Y-%m-%d %H:%M %Z">2026-02-15 14:03</option>
-          <option value="%a %Y-%m-%d %H:%M %Z">Mon 2026-02-15 14:03</option>
-          <option value="%m/%d/%Y %I:%M:%S %p %Z">02/15/2026 02:03:22 PM</option>
-        </select>
-        <label class="muted" for="timezone-select">Zone</label>
-        <select class="chip" id="timezone-select" aria-label="Timezone"></select>
-      </span>
-      <span class="format-control">
-        <label class="muted" for="relative-select">Ago</label>
-        <select class="chip" id="relative-select" aria-label="Relative time style">
-          <option value="compact">2h</option>
-          <option value="verbose">2 hours</option>
-        </select>
-      </span>
       <span class="pill" id="pill"><span class="dot"></span><span id="pill-text">Live · Port {{ honeypot_port }}</span></span>
+      <button class="settings-toggle" id="settings-toggle" type="button" aria-label="Display preferences" aria-expanded="false" aria-controls="settings-panel" title="Display preferences">
+        <svg class="gear" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.5"></circle><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"></path></svg>
+        <svg class="chev" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+      </button>
+      <div class="settings-panel" id="settings-panel" role="region" aria-label="Display preferences" hidden>
+        <div class="settings-section">
+          <div class="settings-section-head">Display</div>
+          <div class="settings-row">
+            <label class="muted" for="format-select">Format</label>
+            <select class="chip" id="format-select" aria-label="Date and time format">
+              <option value="{{ date_format }}">2026-02-15 14:03:22</option>
+              <option value="%Y-%m-%d %H:%M %Z">2026-02-15 14:03</option>
+              <option value="%a %Y-%m-%d %H:%M %Z">Mon 2026-02-15 14:03</option>
+              <option value="%m/%d/%Y %I:%M:%S %p %Z">02/15/2026 02:03:22 PM</option>
+            </select>
+          </div>
+          <div class="settings-row">
+            <label class="muted" for="timezone-select">Zone</label>
+            <select class="chip" id="timezone-select" aria-label="Timezone"></select>
+          </div>
+          <div class="settings-row">
+            <label class="muted" for="relative-select">Ago</label>
+            <select class="chip" id="relative-select" aria-label="Relative time style">
+              <option value="compact">2h</option>
+              <option value="verbose">2 hours</option>
+            </select>
+          </div>
+          <div class="settings-row settings-actions">
+            <button class="chip" id="reset-prefs" type="button">Reset to defaults</button>
+          </div>
+        </div>
+        <div class="settings-section">
+          <div class="settings-section-head">Retention</div>
+          <div class="settings-row">
+            <label class="muted" for="retention-days-input">Keep events for</label>
+            <input class="chip retention-input" id="retention-days-input" type="number"
+                   min="1" max="9999" step="1"
+                   value="{{ retention.days }}"
+                   aria-label="Retention window in days">
+            <span class="muted">days</span>
+          </div>
+          <div class="settings-row" id="retention-status">
+            <span class="retention-status-msg" id="retention-status-msg"></span>
+          </div>
+          <div class="settings-row settings-actions">
+            <button class="chip" id="retention-save" type="button">Save</button>
+            <button class="chip" id="retention-purge" type="button">Purge now</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </header>
@@ -474,15 +567,15 @@
     <article class="panel" id="retention">
       <div class="panel-head">
         <h2>Retention</h2>
-        <span class="hint">Auto-Purge Of Events Older Than {{ retention.hours }} Hours</span>
+        <span class="hint">Events Older Than {{ retention.days }} Day{{ 's' if retention.days != 1 }} Are Candidates For Purge</span>
         <span class="spacer"></span>
-        <span class="chip" id="retention-count">{{ retention.older_than }} events older than {{ retention.hours }}h</span>
+        <span class="chip" id="retention-count">{{ retention.older_than }} event{{ 's' if retention.older_than != 1 }} older than {{ retention.days }} day{{ 's' if retention.days != 1 }}</span>
       </div>
       <div class="retention-body">
         <p>
-          Events older than <strong>{{ retention.hours }} hours</strong> are automatically removed.
+          The dashboard is set to keep events for <strong>{{ retention.days }} day{{ 's' if retention.days != 1 }}</strong>; anything older is a purge candidate.
           {% if retention.admin_enabled %}
-          <button class="chip" id="purge-now" type="button">Purge Now</button>
+          Adjust the window in the settings panel (gear menu) and use <strong>Purge now</strong> there to remove old events.
           {% else %}
           <span class="dimmed">Admin credentials not configured — set WEB_ADMIN_USER / WEB_ADMIN_PASS to enable manual purge.</span>
           {% endif %}
@@ -693,6 +786,32 @@
   }
 
   function initializePreferences() {
+    const settingsToggle = $('#settings-toggle');
+    const settingsPanel = $('#settings-panel');
+    if (settingsToggle && settingsPanel) {
+      settingsToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const open = settingsToggle.getAttribute('aria-expanded') === 'true';
+        settingsToggle.setAttribute('aria-expanded', String(!open));
+        settingsPanel.toggleAttribute('hidden', open);
+      });
+      document.addEventListener('click', (e) => {
+        if (!settingsPanel.classList.contains('hidden') &&
+            !settingsPanel.contains(e.target) &&
+            !settingsToggle.contains(e.target)) {
+          settingsToggle.setAttribute('aria-expanded', 'false');
+          settingsPanel.setAttribute('hidden', '');
+        }
+      });
+      $('#reset-prefs')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        localStorage.removeItem(FORMAT_KEY);
+        localStorage.removeItem(TIMEZONE_KEY);
+        localStorage.removeItem(RELATIVE_KEY);
+        location.reload();
+      });
+      wireRetention();
+    }
     const formatSelect = $('#format-select');
     const timezoneSelect = $('#timezone-select');
     const relativeSelect = $('#relative-select');
@@ -726,6 +845,123 @@
     applyFormat();
   }
   initializePreferences();
+
+  // ---- Retention (server-side, persisted in app_settings) ----
+  const DEFAULT_RETENTION_DAYS = {{ retention.days | tojson }};
+  const RETENTION_ADMIN = {{ retention.admin_enabled | tojson }};
+  let activeRetentionDays = DEFAULT_RETENTION_DAYS;
+
+  function retentionStatusMsg(text, kind) {
+    const el = $('#retention-status-msg');
+    if (!el) return;
+    el.textContent = text;
+    el.className = 'retention-status-msg ' + (kind || '');
+  }
+
+  function disableRetentionActions(disabled) {
+    const row = $('#retention-status');
+    if (!row) return;
+    row.classList.toggle('disabled', disabled);
+  }
+
+  async function loadRetention() {
+    try {
+      const res = await fetch('/api/retention', { cache: 'no-store' });
+      if (!res.ok) throw new Error('retention fetch failed');
+      const data = await res.json();
+      activeRetentionDays = data.retention_days;
+      const input = $('#retention-days-input');
+      if (input) input.value = activeRetentionDays;
+      if (data.enabled) {
+        retentionStatusMsg(`Keeping events for ${data.retention_days} day${data.retention_days === 1 ? '' : 's'}; ` +
+          `${data.older_than} event${data.older_than === 1 ? '' : 's'} older than that.`);
+      } else {
+        retentionStatusMsg('Retention is off — all events are kept.');
+      }
+    } catch (err) {
+      retentionStatusMsg('Could not load retention settings.');
+    }
+  }
+
+  async function saveRetention() {
+    const input = $('#retention-days-input');
+    if (!input) return;
+    const raw = input.value;
+    if (raw === '' || isNaN(raw)) {
+      retentionStatusMsg('Enter a whole number of days (1-9999).', 'err');
+      return;
+    }
+    const days = Math.floor(Number(raw));
+    if (days < 0 || days > 9999) {
+      retentionStatusMsg('Enter a whole number of days between 0 and 9999.', 'err');
+      return;
+    }
+    disableRetentionActions(true);
+    try {
+      const res = await adminFetch('/api/retention', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ retention_days: days }),
+      });
+      activeRetentionDays = res.retention_days;
+      input.value = activeRetentionDays;
+      retentionStatusMsg(
+        activeRetentionDays > 0
+          ? `Keeping events for ${activeRetentionDays} day${activeRetentionDays === 1 ? '' : 's'}; ` +
+            `${res.older_than} event${res.older_than === 1 ? '' : 's'} older than that.`
+          : 'Retention is off — all events are kept.',
+        'ok');
+      await refresh();
+    } catch (err) {
+      retentionStatusMsg(err.message === 'not authorized'
+        ? 'Sign in as admin to change retention.'
+        : 'Could not save retention settings.', 'err');
+    } finally {
+      disableRetentionActions(false);
+    }
+  }
+
+  async function purgeToRetention() {
+    if (!activeRetentionDays) {
+      retentionStatusMsg('No retention window set — nothing to purge.', 'err');
+      return;
+    }
+    if (!window.confirm(`Purge every event older than ${activeRetentionDays} day${activeRetentionDays === 1 ? '' : 's'}? This cannot be undone.`)) return;
+    const btn = $('#retention-purge');
+    if (!btn) return;
+    delButtonState(btn, 'loading');
+    try {
+      const hours = activeRetentionDays * 24;
+      const res = await adminFetch('/api/events?older_than_hours=' + encodeURIComponent(hours), { method: 'DELETE' });
+      delButtonState(btn, 'ok');
+      const msg = document.createElement('span');
+      msg.className = 'chip';
+      msg.style.marginLeft = ' .5rem';
+      msg.textContent = `Purged ${res.total_removed} events`;
+      btn.after(msg);
+      setTimeout(() => { if (msg.parentNode) msg.remove(); }, 4000);
+      await refresh();
+      await loadRetention();
+      setTimeout(() => { delButtonState(btn, 'reset'); }, 400);
+    } catch (err) {
+      delButtonState(btn, 'err');
+    }
+  }
+
+  function wireRetention() {
+    if (!RETENTION_ADMIN) {
+      disableRetentionActions(true);
+      if ($('#retention-save')) $('#retention-save').textContent = 'Admin required';
+      if ($('#retention-purge')) $('#retention-purge').textContent = 'Admin required';
+      return;
+    }
+    $('#retention-save')?.addEventListener('click', (e) => { e.stopPropagation(); saveRetention(); });
+    $('#retention-purge')?.addEventListener('click', (e) => { e.stopPropagation(); purgeToRetention(); });
+    $('#retention-days-input')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); saveRetention(); }
+    });
+    loadRetention();
+  }
 
   function renderStats(s) {
     $('#stat-conn24').textContent = s.connections_24h.toLocaleString();
@@ -838,6 +1074,9 @@
       btn.disabled = true;
       btn.classList.add('confirm');
       setTimeout(() => { if (btn.parentNode) btn.remove(); }, 1200);
+    } else if (state === 'reset') {
+      btn.disabled = false;
+      btn.classList.remove('confirm');
     } else if (state === 'err') {
       btn.disabled = false;
       btn.textContent = 'Retry';
@@ -873,26 +1112,6 @@
     }
   }
 
-  async function purgeNow() {
-    const btn = $('#purge-now');
-    if (!btn) return;
-    delButtonState(btn, 'loading');
-    try {
-      const hours = {{ retention.hours | tojson }};
-      const res = await adminFetch('/api/events?older_than_hours=' + encodeURIComponent(hours), { method: 'DELETE' });
-      delButtonState(btn, 'ok');
-      const msg = document.createElement('span');
-      msg.className = 'chip';
-      msg.style.marginLeft = ' .5rem';
-      msg.textContent = `Purged ${res.total_removed} events`;
-      btn.after(msg);
-      setTimeout(() => { if (msg.parentNode) msg.remove(); }, 4000);
-      await refresh();
-    } catch (err) {
-      delButtonState(btn, 'err');
-    }
-  }
-
   document.addEventListener('click', (ev) => {
     const del = ev.target.closest('.ev-del');
     if (!del) return;
@@ -901,8 +1120,6 @@
     else if (del.dataset.ip) deleteIp(del.dataset.ip);
   });
 
-  const purgeBtn = $('#purge-now');
-  if (purgeBtn) purgeBtn.addEventListener('click', purgeNow);
   const purgeAllBtn = $('#purge-all');
   if (purgeAllBtn) purgeAllBtn.addEventListener('click', async () => {
     if (!window.confirm('Delete every recorded event? This cannot be undone.')) return;

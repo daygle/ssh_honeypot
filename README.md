@@ -128,7 +128,6 @@ Environment variables (set under `environment:` in `docker-compose.yml`):
 | `HOST_KEY_PATH` | `$DATA_DIR/host_key` | Decoy SSH host key (generated on first start) |
 | `WEB_ADMIN_USER` | unset | Enables dashboard login and authenticated record deletion/purge |
 | `WEB_ADMIN_PASS` | unset | Password for the dashboard account; use a long, unique password |
-| `RETENTION_HOURS` | `0` | Automatically remove events older than this many hours; `0` disables it |
 | `DATE_FORMAT` | `%Y-%m-%d %H:%M:%S %Z` | Default date/time display format |
 | `RELATIVE_FORMAT` | `compact` | Default relative-time style: `compact` or `verbose` |
 
@@ -137,15 +136,21 @@ create the admin username and password in its one-time setup form. Passwords
 are stored as salted PBKDF2 hashes. Keep the initial setup link private and use
 HTTPS or a trusted private network while creating the account. Databases from
 before this setup feature keep their current access settings. For Docker
-Compose, you can alternatively provide
-`WEB_ADMIN_USER`, `WEB_ADMIN_PASS`, and optional `RETENTION_HOURS` in the
-environment before `docker compose up -d`; configured credentials skip setup.
+Compose, you can alternatively provide `WEB_ADMIN_USER` and `WEB_ADMIN_PASS`
+in the environment before `docker compose up -d`; configured credentials skip setup.
 
 After setup, the dashboard, stats, IP feed, and CSV export require the same
 HTTP Basic login; the browser prompts for the configured credentials.
 Individual events, all events for an IP, and the complete event history can
-then be deleted from the dashboard. Keep the site behind HTTPS when exposing
-it beyond a trusted network. Date/time format, timezone, and relative-time selections are
+then be deleted from the dashboard. The retention window — how many days to keep
+events before they become purge candidates — is configured in the dashboard
+settings panel (the gear button in the top bar) and is persisted in the SQLite
+database, so it survives restarts and applies to all admins. By default a fresh
+install keeps events for 30 days; set the window to 0 to disable age-based
+purging and keep every event. Purging is always an explicit action — changing the
+window in the settings panel stores the target but does not remove old events until
+you click Purge now there. Keep the site behind HTTPS when exposing it beyond a
+trusted network. Date/time format, timezone, and relative-time selections are
 saved in that browser's local storage and apply to dashboard displays only;
 stored timestamps and CSV exports remain UTC.
 

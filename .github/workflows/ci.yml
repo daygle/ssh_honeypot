@@ -59,8 +59,20 @@ jobs:
             sleep 2
           done
           curl --fail --silent http://127.0.0.1:8080/healthz
-          curl --fail --silent http://127.0.0.1:8080/ | grep --quiet "Daygle SSH Honeypot"
-          curl --fail --silent http://127.0.0.1:8080/ssh-blocklist.txt > /dev/null
+
+          # A fresh install redirects / to /setup until the one-time admin setup is
+          # completed, so read the setup token from the database and finish setup so
+          # the dashboard and blocklist are reachable and assertable. The password
+          # meets the dashboard's minimum length (12).
+          SETUP_KEY=$(docker exec smoke python -c 'import sqlite3; row=sqlite3.connect("/data/honeypot.db").execute("SELECT value FROM app_settings WHERE key=?", ("setup_token",)).fetchone(); print((row or (None,))[0] or "", end="")')
+          curl --fail --silent --request POST \
+            --header "Content-Type: application/x-www-form-urlencoded" \
+            --data "username=admin&password=adminadminadmin1&password_confirm=adminadminadmin1&setup_key=$SETUP_KEY" \
+            http://127.0.0.1:8080/setup
+
+          # After setup the dashboard is protected by HTTP Basic auth.
+          curl --fail --silent --user admin:adminadminadmin1 http://127.0.0.1:8080/ | grep --quiet "Daygle SSH Honeypot"
+          curl --fail --silent --user admin:adminadminadmin1 http://127.0.0.1:8080/ssh-blocklist.txt > /dev/null
 
       - name: Container Logs
         if: always()
